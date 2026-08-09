@@ -119,32 +119,66 @@ def needs_unregistered_role(member: discord.Member, registered: bool) -> bool:
     return not (registered and matches_format(member.display_name))
 
 
+def role_problem(guild: discord.Guild, role_id: int) -> Optional[str]:
+    """이 역할을 봇이 지급할 수 있는지 미리 확인한다.
+
+    문제가 있으면 사람이 읽을 수 있는 이유를, 없으면 None 을 돌려준다.
+    (조용히 실패하면 원인을 찾기 어려워서 미리 걸러 낸다.)
+    """
+    role = guild.get_role(role_id)
+    if role is None:
+        return f"역할(`{role_id}`)을 이 서버에서 찾을 수 없습니다. ID 를 확인해 주세요."
+
+    me = guild.me
+    if me is None:
+        return "봇 정보를 읽을 수 없습니다."
+    if not me.guild_permissions.manage_roles:
+        return "봇에게 **역할 관리** 권한이 없습니다."
+    if role >= me.top_role:
+        return (
+            f"{role.mention} 역할이 봇의 최고 역할({me.top_role.mention})보다 "
+            "높거나 같아서 지급할 수 없습니다. 서버 설정 → 역할에서 **봇 역할을 위로** 올려 주세요."
+        )
+    if role.managed:
+        return f"{role.mention} 은(는) 외부 연동 전용 역할이라 봇이 지급할 수 없습니다."
+    return None
+
+
+# sync_unregistered_role 의 결과
+GIVEN = "given"          # 역할을 새로 지급함
+TAKEN = "taken"          # 역할을 회수함
+UNCHANGED = "unchanged"  # 이미 올바른 상태여서 건드리지 않음
+FAILED = "failed"        # 권한 등의 이유로 바꾸지 못함
+
+
 async def sync_unregistered_role(
     member: discord.Member, registered: bool, *, reason: str = "미등록 역할 동기화"
-) -> Optional[bool]:
+) -> str:
     """미등록 역할을 붙이거나 뗀다.
 
-    반환값: True=지급함, False=회수함, None=변화 없음/실패
+    반환값은 GIVEN / TAKEN / UNCHANGED / FAILED 중 하나다.
+    '바꿀 필요가 없었다'와 '바꾸려다 실패했다'를 구분해야 집계가 정확해진다.
     """
     if member.bot:
-        return None
+        return UNCHANGED
     role = member.guild.get_role(Roles.UNREGISTERED)
     if role is None:
         log.warning("미등록 역할(%s)을 찾을 수 없습니다.", Roles.UNREGISTERED)
-        return None
+        return FAILED
 
     has = role in member.roles
     should = needs_unregistered_role(member, registered)
+    if should == has:
+        return UNCHANGED
 
     try:
-        if should and not has:
+        if should:
             await member.add_roles(role, reason=reason)
-            return True
-        if not should and has:
-            await member.remove_roles(role, reason=reason)
-            return False
+            return GIVEN
+        await member.remove_roles(role, reason=reason)
+        return TAKEN
     except discord.Forbidden:
         log.warning("[%s] 미등록 역할을 변경할 권한이 없습니다.", member)
     except discord.HTTPException as exc:
         log.warning("[%s] 미등록 역할 변경 실패: %s", member, exc)
-    return None
+    return FAILED

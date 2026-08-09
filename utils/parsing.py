@@ -42,7 +42,27 @@ LANE_ALIASES: dict[str, str] = {
     "서폿": "SUP",
 }
 
-RIOT_TAG_PATTERN = re.compile(r"^[A-Za-z0-9]{2,5}$")
+# 라이엇 태그는 영문·숫자뿐 아니라 한글도 쓸 수 있고 공백이 들어가기도 한다.
+# (예: `원 샷#올 킬`) 그래서 구분자로 쓰는 `#` `/` 만 막고 나머지는 열어 둔다.
+# 진짜 존재하는 계정인지는 `/등록` 에서 라이엇 API 가 확인해 준다.
+TAG_MAX_LENGTH = 10
+TAG_FORBIDDEN = "#/"
+
+
+def valid_tag(tag: str) -> bool:
+    """`#태그` 로 쓸 수 있는 문자열인지."""
+    if not 1 <= len(tag) <= TAG_MAX_LENGTH:
+        return False
+    if any(ch in tag for ch in TAG_FORBIDDEN):
+        return False
+    # 문자(한글 포함) · 숫자 · 공백만 허용
+    return all(ch.isalnum() or ch == " " for ch in tag)
+
+
+TAG_ERROR = (
+    f"`#태그`는 공백 포함 1~{TAG_MAX_LENGTH}자여야 하고 `#` `/` 는 쓸 수 없습니다. "
+    "(예: `KR1`, `올 킬`)"
+)
 
 
 @dataclass(slots=True)
@@ -108,8 +128,8 @@ def parse_profile_format(text: str) -> ProfileFormat:
     tag_line = tag_line.strip()
     if not game_name:
         raise FormatError("롤 닉네임이 비어 있습니다.")
-    if not RIOT_TAG_PATTERN.match(tag_line):
-        raise FormatError("`#태그`는 영문·숫자 2~5자여야 합니다. (예: `KR1`)")
+    if not valid_tag(tag_line):
+        raise FormatError(TAG_ERROR)
 
     # 2) 티어
     tier_match = TIER_PATTERN.match(tier_part.replace(" ", ""))
@@ -176,6 +196,6 @@ def split_riot_id(text: str) -> tuple[str, str]:
     tag_line = tag_line.strip()
     if not game_name:
         raise FormatError("롤 닉네임이 비어 있습니다.")
-    if not RIOT_TAG_PATTERN.match(tag_line):
-        raise FormatError("`#태그`는 영문·숫자 2~5자여야 합니다. (예: `KR1`)")
+    if not valid_tag(tag_line):
+        raise FormatError(TAG_ERROR)
     return game_name, tag_line

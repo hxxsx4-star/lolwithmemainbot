@@ -17,7 +17,7 @@ from core.checks import is_staff
 from utils.logs import base_embed, send_log, truncate, user_field
 from utils.parsing import FormatError, split_riot_id
 from utils.riot import RiotError
-from utils.roles import sync_unregistered_role
+from utils.roles import TAKEN, sync_unregistered_role
 
 log = logging.getLogger("mainbot.register")
 
@@ -124,7 +124,7 @@ class RiotRegister(commands.Cog, name="RiotRegister"):
             embed.add_field(name="솔로랭크", value=rank_label, inline=True)
         if previous.riot_id and previous.riot_id != f"{game_name}#{tag_line}":
             embed.add_field(name="이전 등록", value=f"`{previous.riot_id}`", inline=True)
-        if removed is False:
+        if removed == TAKEN:
             embed.add_field(
                 name="역할",
                 value="미등록 역할이 회수되었습니다.",

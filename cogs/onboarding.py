@@ -13,11 +13,17 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 
-from config import Channels, Colors, Roles
+from config import Channels, Colors, GUILD_ID, Roles
 from core.checks import staff_only
 from utils.logs import base_embed, truncate
 from utils.parsing import FormatError, parse_profile_format
-from utils.roles import apply_tier_and_lanes, lane_label, sync_unregistered_role
+from utils import roles
+from utils.roles import (
+    apply_tier_and_lanes,
+    lane_label,
+    role_problem,
+    sync_unregistered_role,
+)
 
 log = logging.getLogger("mainbot.onboarding")
 
@@ -35,6 +41,81 @@ class Onboarding(commands.Cog, name="Onboarding"):
 
     def __init__(self, bot: commands.Bot) -> None:
         self.bot = bot
+        self._startup_done = False
+
+    # ------------------------------------------------- 시작할 때 자동 동기화
+
+    @commands.Cog.listener()
+    async def on_ready(self) -> None:
+        """봇이 켜지면 기존 인원 전체의 미등록 역할을 한 번 맞춰 준다.
+
+        on_ready 는 재접속할 때마다 불리므로 프로세스당 한 번만 돌린다.
+        인원이 많으면 시간이 걸리니 백그라운드로 돌려 시작을 막지 않는다.
+        """
+        if self._startup_done:
+            return
+        self._startup_done = True
+        self.bot.loop.create_task(self._startup_sync())
+
+    async def _startup_sync(self) -> None:
+        for guild in self.bot.guilds:
+            if GUILD_ID is not None and guild.id != GUILD_ID:
+                continue
+
+            problem = role_problem(guild, Roles.UNREGISTERED)
+            if problem is not None:
+                log.warning(
+                    "[%s] 미등록 역할을 자동 지급하지 못했습니다: %s",
+                    guild.name,
+                    discord.utils.remove_markdown(problem),
+                )
+                continue
+
+            given, taken, skipped, failed = await self._bulk_sync(
+                guild, reason="봇 시작 시 미등록 역할 자동 동기화"
+            )
+            log.info(
+                "[%s] 미등록 역할 자동 동기화 완료 — 지급 %d명 / 회수 %d명 /"
+                " 봇 제외 %d명 / 실패 %d명",
+                guild.name,
+                given,
+                taken,
+                skipped,
+                failed,
+            )
+
+    async def _bulk_sync(
+        self, guild: discord.Guild, *, reason: str
+    ) -> tuple[int, int, int, int]:
+        """서버 전원의 미등록 역할을 맞춘다. (지급, 회수, 봇제외, 실패)"""
+        # 멤버 캐시가 비어 있으면 먼저 받아 온다
+        if not guild.chunked:
+            try:
+                await guild.chunk()
+            except (discord.ClientException, discord.HTTPException) as exc:
+                log.warning("[%s] 멤버 목록을 불러오지 못했습니다: %s", guild.name, exc)
+
+        given = taken = skipped = failed = 0
+
+        for index, member in enumerate(guild.members):
+            if member.bot:
+                skipped += 1
+                continue
+
+            user = await self.bot.db.get_user(member.id)
+            result = await sync_unregistered_role(member, user.registered, reason=reason)
+            if result == roles.GIVEN:
+                given += 1
+            elif result == roles.TAKEN:
+                taken += 1
+            elif result == roles.FAILED:
+                failed += 1
+
+            # 디스코드 속도 제한을 피하려고 잠깐씩 쉰다
+            if index % 20 == 19:
+                await asyncio.sleep(1)
+
+        return given, taken, skipped, failed
 
     # -------------------------------------------------------- 양식 채팅 처리
 
@@ -158,44 +239,42 @@ class Onboarding(commands.Cog, name="Onboarding"):
         guild = interaction.guild
         if guild is None:
             return
-        role = guild.get_role(Roles.UNREGISTERED)
-        if role is None:
+
+        # 조용히 아무 일도 안 일어나는 상황을 막기 위해 원인을 먼저 확인한다
+        problem = role_problem(guild, Roles.UNREGISTERED)
+        if problem is not None:
             await interaction.response.send_message(
-                f"미등록 역할(`{Roles.UNREGISTERED}`)을 찾을 수 없습니다.", ephemeral=True
+                f"⛔ 미등록 역할을 지급할 수 없습니다.\n\n{problem}", ephemeral=True
             )
             return
 
         await interaction.response.defer(ephemeral=True)
+        role = guild.get_role(Roles.UNREGISTERED)
 
-        given = taken = skipped = 0
-        members = guild.members
-        if not members:
-            members = [m async for m in guild.fetch_members(limit=None)]
-
-        for index, member in enumerate(members):
-            if member.bot:
-                skipped += 1
-                continue
-            user = await self.bot.db.get_user(member.id)
-            result = await sync_unregistered_role(
-                member, user.registered, reason=f"미등록 역할 일괄 정리 ({interaction.user})"
-            )
-            if result is True:
-                given += 1
-            elif result is False:
-                taken += 1
-            # 디스코드 속도 제한을 피하려고 잠깐씩 쉰다
-            if index % 20 == 19:
-                await asyncio.sleep(1)
+        given, taken, skipped, failed = await self._bulk_sync(
+            guild, reason=f"미등록 역할 일괄 정리 ({interaction.user})"
+        )
 
         embed = base_embed(
             "🔁 미등록 역할 동기화 완료",
-            Colors.SUCCESS,
+            Colors.DANGER if failed else Colors.SUCCESS,
             description=f"{role.mention} 역할을 기준에 맞춰 정리했습니다.",
         )
         embed.add_field(name="새로 지급", value=f"{given}명", inline=True)
         embed.add_field(name="회수", value=f"{taken}명", inline=True)
         embed.add_field(name="제외(봇)", value=f"{skipped}명", inline=True)
+        embed.add_field(
+            name="확인한 인원", value=f"{len(guild.members)}명", inline=True
+        )
+        if failed:
+            embed.add_field(
+                name="⚠️ 실패",
+                value=(
+                    f"{failed}명은 역할을 바꾸지 못했습니다. "
+                    "대상의 역할이 봇보다 높은 경우일 수 있습니다. (로그 확인)"
+                ),
+                inline=False,
+            )
         embed.add_field(
             name="기준",
             value="닉네임이 양식에 맞고 `/등록` 까지 마친 사람만 역할이 없습니다.",
