@@ -216,3 +216,11 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# 봇 설정 및 동적 데이터
+.env
+data/
+assets/fonts/*.ttf
+assets/fonts/*.otf
+assets/fonts/*.ttc
+!assets/fonts/.gitkeep

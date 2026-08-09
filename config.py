@@ -1,0 +1,179 @@
+"""롤 같이 하자 - 메인봇 설정."""
+from __future__ import annotations
+
+import os
+from pathlib import Path
+from zoneinfo import ZoneInfo
+
+from dotenv import load_dotenv
+
+load_dotenv()
+
+BASE_DIR = Path(__file__).resolve().parent
+DATA_DIR = Path(os.getenv("DATA_DIR", BASE_DIR / "data"))
+ASSET_DIR = BASE_DIR / "assets"
+FONT_DIR = ASSET_DIR / "fonts"
+
+DATA_DIR.mkdir(parents=True, exist_ok=True)
+DB_PATH = DATA_DIR / "lolwithme.sqlite3"
+
+TOKEN = os.getenv("DISCORD_TOKEN", "")
+RIOT_API_KEY = os.getenv("RIOT_API_KEY", "")
+
+_guild = os.getenv("GUILD_ID", "").strip()
+GUILD_ID = int(_guild) if _guild.isdigit() else None
+
+TIMEZONE = ZoneInfo(os.getenv("TIMEZONE", "Asia/Seoul"))
+
+# 라이엇 계정 API 지역 라우팅 (한국 계정은 asia)
+RIOT_ACCOUNT_REGION = os.getenv("RIOT_ACCOUNT_REGION", "asia")
+RIOT_PLATFORM = os.getenv("RIOT_PLATFORM", "kr")
+
+
+class Channels:
+    """채널 ID."""
+
+    POINT_LOG = 1535952070207610930        # 포인트 로그 (출석 · 지급 · 차감)
+    VOICE_POINT_LOG = 1535952369978834954  # 음성 활동 포인트 지급 로그
+    WARN_LOG = 1535953668619116554         # 경고 지급 로그
+    WARN_REMOVE_LOG = 1535960186450087957  # 경고 차감 로그
+    BACKUP = 1535960305065267210           # 매일 자정 데이터 백업
+    REGISTER_LOG = 1535960377014227034     # 롤 닉네임 등록 로그
+    TICKET_PANEL = 1536033094442942565     # 티켓(문의함) 생성 채널
+    ONBOARDING = 1536033191381569556       # 닉네임 양식 입력 채널
+    SCRIM_FORUM = 1536049980836548720      # 내전 포럼 채널
+
+
+class Roles:
+    """역할 ID."""
+
+    SCRIM_HOST = 1536050031520514168     # 내전 생성 가능 역할
+    UNREGISTERED = 1536052613538250803   # 미등록 인원 역할
+
+    # 티어 약자 → 역할 ID
+    TIERS: dict[str, int] = {
+        "C": 1369251450814988309,   # 챌린저
+        "GM": 1369251448369582150,  # 그랜드마스터
+        "M": 1369251445882355732,   # 마스터
+        "D": 1369251442975707218,   # 다이아몬드
+        "E": 1369251429889478676,   # 에메랄드
+        "P": 1369251427251130429,   # 플레티넘
+        "G": 1369251424113922138,   # 골드
+        "S": 1369251378630889584,   # 실버
+        "B": 1369251332552134768,   # 브론즈
+        "I": 1369251237865717840,   # 아이언
+        "U": 1369251029140635668,   # 언랭
+    }
+
+    # 주 라인 약자 → 역할 ID
+    MAIN_LANES: dict[str, int] = {
+        "TOP": 1536110430446162073,
+        "JG": 1536110449576386700,
+        "MID": 1536110468329115678,
+        "AD": 1536110487065067602,
+        "SUP": 1536110508057436170,
+    }
+
+    # 부 라인 약자 → 역할 ID
+    SUB_LANES: dict[str, int] = {
+        "TOP": 1536110528676634724,
+        "JG": 1536110544602275900,
+        "MID": 1536110565275996191,
+        "AD": 1536110580778147933,
+        "SUP": 1536110603175858266,
+    }
+
+
+# 약자 → 한글 이름
+TIER_NAMES: dict[str, str] = {
+    "U": "언랭크",
+    "I": "아이언",
+    "B": "브론즈",
+    "S": "실버",
+    "G": "골드",
+    "P": "플래티넘",
+    "E": "에메랄드",
+    "D": "다이아몬드",
+    "M": "마스터",
+    "GM": "그랜드마스터",
+    "C": "챌린저",
+}
+
+LANE_NAMES: dict[str, str] = {
+    "TOP": "탑",
+    "JG": "정글",
+    "MID": "미드",
+    "AD": "원거리 딜러",
+    "SUP": "서포터",
+}
+
+# 프로필 카드처럼 폭이 좁은 곳에서 쓰는 짧은 표기
+LANE_SHORT: dict[str, str] = {
+    "TOP": "탑",
+    "JG": "정글",
+    "MID": "미드",
+    "AD": "원딜",
+    "SUP": "서폿",
+}
+
+
+class Economy:
+    """경제 시스템 수치."""
+
+    UNIT = "P"
+    ATTENDANCE_REWARD = 100      # /출석 보상
+    VOICE_INTERVAL_MINUTES = 10  # 음성 포인트 지급 주기
+    VOICE_REWARD = 10            # 주기마다 지급할 포인트
+    IGNORE_AFK_CHANNEL = True    # 잠수 채널은 적립 제외
+
+
+class Warning:
+    """경고 시스템 수치."""
+
+    BAN_THRESHOLD = 3            # 이 횟수 이상이면 자동 서버 차단
+    BAN_DELETE_MESSAGE_DAYS = 0  # 차단 시 삭제할 메시지 기간(일)
+
+
+class Colors:
+    """LoL 골드/네이비 계열 팔레트."""
+
+    GOLD = 0xC8AA6E
+    DARK_GOLD = 0x785A28
+    TEAL = 0x0AC8B9
+    NAVY = 0x0A1428
+    SUCCESS = 0x3FBF7F
+    DANGER = 0xC8443C
+    INFO = 0x5865F2
+
+
+# 프로필 카드 배경 이미지 (없으면 자동으로 그라데이션 배경을 생성)
+PROFILE_BACKGROUND = ASSET_DIR / os.getenv("PROFILE_BACKGROUND", "profile_bg.png")
+
+# 프로필 카드 문구
+PROFILE_SLOGAN = "롤 같이 하자"
+
+# 한글 폰트 후보. 위에서부터 존재하는 것을 사용한다.
+FONT_CANDIDATES: tuple[Path | str, ...] = (
+    FONT_DIR / "Pretendard-Bold.ttf",
+    FONT_DIR / "NanumGothicBold.ttf",
+    FONT_DIR / "NotoSansKR-Bold.ttf",
+    "/usr/share/fonts/truetype/nanum/NanumGothicBold.ttf",
+    "/usr/share/fonts/truetype/noto/NotoSansCJK-Bold.ttc",
+    "/usr/share/fonts/opentype/noto/NotoSansCJK-Bold.ttc",
+    "C:/Windows/Fonts/malgunbd.ttf",
+    "C:/Windows/Fonts/malgun.ttf",
+    "/System/Library/Fonts/AppleSDGothicNeo.ttc",
+    "/usr/share/fonts/truetype/wqy/wqy-zenhei.ttc",  # 최후의 수단 (한글 글리프 포함)
+)
+
+FONT_CANDIDATES_REGULAR: tuple[Path | str, ...] = (
+    FONT_DIR / "Pretendard-Regular.ttf",
+    FONT_DIR / "NanumGothic.ttf",
+    FONT_DIR / "NotoSansKR-Regular.ttf",
+    "/usr/share/fonts/truetype/nanum/NanumGothic.ttf",
+    "/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc",
+    "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
+    "C:/Windows/Fonts/malgun.ttf",
+    "/System/Library/Fonts/AppleSDGothicNeo.ttc",
+    "/usr/share/fonts/truetype/wqy/wqy-zenhei.ttc",  # 최후의 수단 (한글 글리프 포함)
+)
