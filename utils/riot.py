@@ -44,6 +44,13 @@ class RiotAccount:
         return f"{self.game_name}#{self.tag_line}"
 
 
+APEX_TIERS = ("MASTER", "GRANDMASTER", "CHALLENGER")
+
+# 로마 숫자 division 을 그대로 쓴다 (마스터 이상은 division 이 없다)
+QUEUE_SOLO = "RANKED_SOLO_5x5"
+QUEUE_FLEX = "RANKED_FLEX_SR"
+
+
 @dataclass(slots=True)
 class RankEntry:
     queue: str
@@ -58,11 +65,48 @@ class RankEntry:
         return TIER_CODE.get(self.tier.upper())
 
     @property
+    def tier_name(self) -> str:
+        """한글 티어 이름 (마스터 미만은 division 포함)."""
+        from config import TIER_NAMES
+
+        code = self.tier_code
+        base = TIER_NAMES.get(code, self.tier.capitalize()) if code else self.tier
+        if self.tier.upper() in APEX_TIERS or not self.rank:
+            return base
+        return f"{base} {self.rank}"
+
+    @property
+    def record(self) -> str:
+        """`25 LP · 159승 130패` 형태의 한 줄 요약."""
+        return f"{self.league_points} LP · {self.wins}승 {self.losses}패"
+
+    @property
     def label(self) -> str:
         base = self.tier.capitalize()
-        if self.tier.upper() in ("MASTER", "GRANDMASTER", "CHALLENGER"):
+        if self.tier.upper() in APEX_TIERS:
             return f"{base} {self.league_points}LP"
         return f"{base} {self.rank} {self.league_points}LP"
+
+    def to_dict(self) -> dict:
+        return {
+            "queue": self.queue,
+            "tier": self.tier,
+            "rank": self.rank,
+            "leaguePoints": self.league_points,
+            "wins": self.wins,
+            "losses": self.losses,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "RankEntry":
+        return cls(
+            queue=data.get("queue", ""),
+            tier=data.get("tier", ""),
+            rank=data.get("rank", ""),
+            league_points=int(data.get("leaguePoints", 0)),
+            wins=int(data.get("wins", 0)),
+            losses=int(data.get("losses", 0)),
+        )
 
 
 class RiotClient:
@@ -132,23 +176,32 @@ class RiotClient:
             tag_line=data.get("tagLine", tag_line),
         )
 
-    async def fetch_solo_rank(self, puuid: str) -> Optional[RankEntry]:
-        """솔로랭크 티어를 조회한다. 배치 전이거나 실패하면 None."""
+    async def fetch_ranks(self, puuid: str) -> dict[str, Optional[RankEntry]]:
+        """솔로랭크와 자유랭크를 한 번에 조회한다. 실패하면 둘 다 None."""
+        result: dict[str, Optional[RankEntry]] = {"solo": None, "flex": None}
         url = LEAGUE_URL.format(platform=RIOT_PLATFORM, puuid=puuid)
         try:
             data = await self._get(url)
         except RiotError:
-            return None
+            return result
         if not isinstance(data, list):
-            return None
+            return result
+
+        by_queue = {QUEUE_SOLO: "solo", QUEUE_FLEX: "flex"}
         for entry in data:
-            if entry.get("queueType") == "RANKED_SOLO_5x5":
-                return RankEntry(
-                    queue=entry["queueType"],
-                    tier=entry.get("tier", ""),
-                    rank=entry.get("rank", ""),
-                    league_points=int(entry.get("leaguePoints", 0)),
-                    wins=int(entry.get("wins", 0)),
-                    losses=int(entry.get("losses", 0)),
-                )
-        return None
+            key = by_queue.get(entry.get("queueType", ""))
+            if key is None:
+                continue
+            result[key] = RankEntry(
+                queue=entry["queueType"],
+                tier=entry.get("tier", ""),
+                rank=entry.get("rank", ""),
+                league_points=int(entry.get("leaguePoints", 0)),
+                wins=int(entry.get("wins", 0)),
+                losses=int(entry.get("losses", 0)),
+            )
+        return result
+
+    async def fetch_solo_rank(self, puuid: str) -> Optional[RankEntry]:
+        """솔로랭크만 필요할 때 쓰는 단축 함수."""
+        return (await self.fetch_ranks(puuid))["solo"]

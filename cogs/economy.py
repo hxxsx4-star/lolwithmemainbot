@@ -13,7 +13,7 @@ import discord
 from discord import app_commands
 from discord.ext import commands, tasks
 
-from config import Channels, Colors, Economy, GUILD_ID
+from config import Channels, Colors, Economy, GUILD_ID, Level
 from core.checks import staff_only
 from utils.logs import base_embed, send_log, truncate, user_field
 
@@ -21,6 +21,8 @@ log = logging.getLogger("mainbot.economy")
 
 TICK_SECONDS = 60
 REQUIRED_SECONDS = Economy.VOICE_INTERVAL_MINUTES * 60
+# 1분 틱마다 쌓이는 음성 경험치 (소수점은 다음 틱으로 이월한다)
+XP_PER_TICK = Level.VOICE_XP_PER_MINUTE * TICK_SECONDS / 60
 
 
 def fmt_points(value: int) -> str:
@@ -42,6 +44,8 @@ class Economy_(commands.Cog, name="Economy"):
         self.bot = bot
         # 유저별로 아직 포인트로 환산되지 않은 음성 체류 초
         self._pending: defaultdict[int, int] = defaultdict(int)
+        # 분당 2.5XP 처럼 정수로 떨어지지 않는 몫을 다음 틱으로 넘기기 위한 자투리
+        self._xp_carry: defaultdict[int, float] = defaultdict(float)
 
     async def cog_load(self) -> None:
         self.voice_tick.start()
@@ -73,11 +77,23 @@ class Economy_(commands.Cog, name="Economy"):
                         continue
                     self._pending[member.id] += TICK_SECONDS
                     await self.bot.db.add_voice_seconds(member.id, TICK_SECONDS)
+                    await self._grant_voice_xp(member)
 
                     if self._pending[member.id] < REQUIRED_SECONDS:
                         continue
                     self._pending[member.id] -= REQUIRED_SECONDS
                     await self._grant_voice_points(member, channel)
+
+    async def _grant_voice_xp(self, member: discord.Member) -> None:
+        """음성 채널에 있는 동안 음성 경험치를 자동으로 쌓는다."""
+        self._xp_carry[member.id] += XP_PER_TICK
+        whole = int(self._xp_carry[member.id])
+        if whole <= 0:
+            return
+        self._xp_carry[member.id] -= whole
+        before, after = await self.bot.db.add_xp(member.id, "voice_xp", whole)
+        if after > before:
+            log.info("[%s] 음성 레벨 %d → %d", member, before, after)
 
     async def _grant_voice_points(
         self, member: discord.Member, channel: discord.VoiceChannel
@@ -122,6 +138,7 @@ class Economy_(commands.Cog, name="Economy"):
         """음성 채널을 완전히 떠나면 남은 자투리 시간은 버린다."""
         if after.channel is None and before.channel is not None:
             self._pending.pop(member.id, None)
+            self._xp_carry.pop(member.id, None)
 
     # ------------------------------------------------------------- 출석
 

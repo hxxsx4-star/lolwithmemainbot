@@ -1,8 +1,25 @@
 """`/프로필` 카드 이미지 생성 (Pillow).
 
-배경은 `assets/profile_bg.png` 를 쓰고, 없으면 LoL 느낌의 네이비 그라데이션을
-직접 그려서 대신 사용한다. 테두리와 강조색은 배경(협곡/골드 계열)에 어울리도록
-골드(#C8AA6E) · 청록(#0AC8B9) 조합으로 맞췄다.
+배치는 서버에서 쓰던 프로필 카드 시안을 그대로 따랐다.
+
+    ┌───────────────────────────────────────────────────────┐
+    │ (아바타)  롤 같이 하자                    ┌ 보유 포인트 ┐ │
+    │           닉네임                          │   120 P   │ │
+    │           PLAY TOGETHER, WIN TOGETHER.    └───────────┘ │
+    │ ┌───────────────────────────────────────────────────┐ │
+    │ │ 음성 레벨 Lv.1                              #4위   │ │
+    │ │ ▓▓▓▓░░░░░░░░░░░░░░░░░░░░░░░░░░      0 / 655 XP    │ │
+    │ │ 채팅 레벨 Lv.0                              #1위   │ │
+    │ │ ▓▓▓▓▓▓▓░░░░░░░░░░░░░░░░░░░░░      108 / 600 XP    │ │
+    │ └───────────────────────────────────────────────────┘ │
+    │ ┌─ 롤 솔랭 티어 ─────┐  ┌─ 롤 자유랭크 티어 ────────┐ │
+    │ │ (엠블럼) 마스터    │  │ (엠블럼) 마스터           │ │
+    │ └───────────────────┘  └──────────────────────────┘ │
+    └───────────────────────────────────────────────────────┘
+
+시안의 보라색 테두리는 배경(협곡 픽셀아트 · 네이비 + 골드 프레임)에 맞춰
+골드 계열로 바꿨다. 배경은 `assets/profile_bg.png` 를 흐리게+어둡게 깔아
+그 위의 글자가 항상 읽히도록 했다.
 """
 from __future__ import annotations
 
@@ -19,44 +36,67 @@ from config import (
     FONT_CANDIDATES_REGULAR,
     PROFILE_BACKGROUND,
     PROFILE_SLOGAN,
+    PROFILE_SUBTITLE,
+    TIER_EMBLEM_DIR,
 )
 
 log = logging.getLogger("mainbot.card")
 
-WIDTH, HEIGHT = 1000, 420
+WIDTH, HEIGHT = 1200, 750
 
-# 팔레트 — 배경 이미지 위에서도 읽히도록 대비를 확보한 값들
-GOLD = (200, 170, 110)
-GOLD_SOFT = (120, 90, 40)
-CREAM = (240, 230, 210)
-TEAL = (10, 200, 185)
-NAVY = (10, 20, 40)
-MUTED = (170, 180, 195)
-DANGER = (230, 90, 80)
+# ---------------------------------------------------------------- 팔레트
+# 배경(네이비 하늘 + 골드 프레임 + 청록/보랏빛 보석)에서 뽑아낸 색들
+GOLD = (212, 179, 106)
+GOLD_BRIGHT = (240, 217, 140)
+GOLD_DIM = (146, 116, 60)
+CREAM = (244, 241, 232)
+MUTED = (168, 178, 200)
+MUTED_WARM = (186, 176, 158)
+NAVY = (10, 16, 38)
+BLUE = (110, 175, 235)
+BLUE_BRIGHT = (150, 205, 250)
 
-PANEL_FILL = (8, 16, 34, 205)
-CHIP_FILL = (14, 28, 54, 225)
-CHIP_EDGE = (120, 90, 40, 255)
+PANEL_FILL = (12, 20, 44, 198)
+BOX_FILL = (10, 16, 36, 214)
+BAR_TRACK = (206, 210, 222, 210)
 
-# 티어별 강조색
+# 티어별 색 (엠블럼 이미지가 없을 때 직접 그리는 크레스트에 쓴다)
 TIER_COLORS: dict[str, tuple[int, int, int]] = {
-    "C": (240, 230, 210),
-    "GM": (220, 100, 100),
-    "M": (190, 120, 220),
-    "D": (110, 170, 240),
+    "C": (110, 210, 240),
+    "GM": (214, 96, 96),
+    "M": (186, 122, 220),
+    "D": (110, 168, 240),
     "E": (80, 200, 140),
-    "P": (90, 200, 200),
-    "G": (220, 180, 90),
-    "S": (180, 190, 200),
-    "B": (170, 120, 90),
+    "P": (86, 196, 196),
+    "G": (222, 182, 92),
+    "S": (176, 188, 200),
+    "B": (172, 122, 90),
     "I": (140, 140, 140),
-    "U": (120, 130, 145),
+    "U": (118, 128, 145),
+}
+
+# 티어 약자 → 라이엇 엠블럼 파일 이름
+TIER_SLUGS: dict[str, str] = {
+    "C": "challenger",
+    "GM": "grandmaster",
+    "M": "master",
+    "D": "diamond",
+    "E": "emerald",
+    "P": "platinum",
+    "G": "gold",
+    "S": "silver",
+    "B": "bronze",
+    "I": "iron",
+    "U": "unranked",
 }
 
 
-@functools.lru_cache(maxsize=32)
+# ---------------------------------------------------------------- 폰트
+
+
+@functools.lru_cache(maxsize=48)
 def _font(size: int, bold: bool = True) -> ImageFont.FreeTypeFont:
-    """한글이 나오는 폰트를 찾아 로드한다. 없으면 기본 폰트."""
+    """한글이 나오는 폰트를 찾아 로드한다."""
     candidates: Sequence[Path | str] = (
         FONT_CANDIDATES if bold else FONT_CANDIDATES_REGULAR
     )
@@ -71,11 +111,50 @@ def _font(size: int, bold: bool = True) -> ImageFont.FreeTypeFont:
     return ImageFont.load_default(size)
 
 
-def _rounded(size: tuple[int, int], radius: int, fill, outline=None, width: int = 2) -> Image.Image:
-    """둥근 사각형 레이어를 만든다."""
+def _fit(draw: ImageDraw.ImageDraw, text: str, font, max_width: int) -> str:
+    """가로 폭에 맞게 말줄임한다."""
+    if draw.textlength(text, font=font) <= max_width:
+        return text
+    trimmed = text
+    while trimmed and draw.textlength(trimmed + "…", font=font) > max_width:
+        trimmed = trimmed[:-1]
+    return (trimmed + "…") if trimmed else "…"
+
+
+def _shrink_to_fit(
+    draw: ImageDraw.ImageDraw, text: str, max_width: int, largest: int, smallest: int
+):
+    """폭 안에 들어가는 가장 큰 글자 크기를 고른다 (포인트 자릿수가 커질 때)."""
+    for size in range(largest, smallest - 1, -1):
+        font = _font(size)
+        if draw.textlength(text, font=font) <= max_width:
+            return font
+    return _font(smallest)
+
+
+def _tracked_text(
+    draw: ImageDraw.ImageDraw,
+    xy: tuple[int, int],
+    text: str,
+    font,
+    fill,
+    spacing: float = 2.0,
+) -> None:
+    """글자 사이를 벌려서 그린다 (시안의 소제목 스타일)."""
+    x, y = xy
+    for char in text:
+        draw.text((x, y), char, font=font, fill=fill)
+        x += draw.textlength(char, font=font) + spacing
+
+
+# ------------------------------------------------------------ 도형 헬퍼
+
+
+def _rounded(
+    size: tuple[int, int], radius: int, fill, outline=None, width: int = 2
+) -> Image.Image:
     layer = Image.new("RGBA", size, (0, 0, 0, 0))
-    draw = ImageDraw.Draw(layer)
-    draw.rounded_rectangle(
+    ImageDraw.Draw(layer).rounded_rectangle(
         (0, 0, size[0] - 1, size[1] - 1),
         radius=radius,
         fill=fill,
@@ -85,50 +164,96 @@ def _rounded(size: tuple[int, int], radius: int, fill, outline=None, width: int 
     return layer
 
 
+def _rounded_mask(size: tuple[int, int], radius: int) -> Image.Image:
+    """안티에일리어싱된 둥근 사각형 마스크 (4배로 그린 뒤 축소)."""
+    scale = 4
+    big = Image.new("L", (size[0] * scale, size[1] * scale), 0)
+    ImageDraw.Draw(big).rounded_rectangle(
+        (0, 0, size[0] * scale - 1, size[1] * scale - 1),
+        radius=radius * scale,
+        fill=255,
+    )
+    return big.resize(size, Image.LANCZOS)
+
+
+def _horizontal_gradient(
+    size: tuple[int, int], left: tuple[int, int, int], right: tuple[int, int, int]
+) -> Image.Image:
+    w, h = size
+    grad = Image.new("RGB", (max(1, w), 1))
+    px = grad.load()
+    for x in range(max(1, w)):
+        ratio = x / max(1, w - 1)
+        px[x, 0] = tuple(int(left[i] + (right[i] - left[i]) * ratio) for i in range(3))
+    return grad.resize((max(1, w), h), Image.BILINEAR).convert("RGBA")
+
+
 def _cover(image: Image.Image, size: tuple[int, int]) -> Image.Image:
-    """비율을 유지하며 잘라서 꽉 채운다 (CSS 의 object-fit: cover)."""
+    """비율을 유지하며 잘라서 꽉 채운다 (CSS object-fit: cover)."""
     target_w, target_h = size
     src_w, src_h = image.size
     scale = max(target_w / src_w, target_h / src_h)
-    new = image.resize((max(1, int(src_w * scale)), max(1, int(src_h * scale))), Image.LANCZOS)
+    new = image.resize(
+        (max(1, int(src_w * scale)), max(1, int(src_h * scale))), Image.LANCZOS
+    )
     left = (new.width - target_w) // 2
     top = (new.height - target_h) // 2
     return new.crop((left, top, left + target_w, top + target_h))
 
 
+# ---------------------------------------------------------------- 배경
+
+
 def _fallback_background(size: tuple[int, int]) -> Image.Image:
-    """배경 파일이 없을 때 쓰는 네이비→골드 그라데이션."""
+    """배경 파일이 없을 때 쓰는 네이비 + 골드 그라데이션."""
     w, h = size
     base = Image.new("RGB", (w, h), NAVY)
     draw = ImageDraw.Draw(base)
     for y in range(h):
         ratio = y / max(1, h - 1)
-        r = int(8 + 40 * ratio)
-        g = int(18 + 40 * ratio)
-        b = int(38 + 30 * ratio)
-        draw.line([(0, y), (w, y)], fill=(r, g, b))
+        draw.line(
+            [(0, y), (w, y)],
+            fill=(int(9 + 26 * ratio), int(15 + 30 * ratio), int(36 + 34 * ratio)),
+        )
     glow = Image.new("RGB", (w, h), (0, 0, 0))
     gdraw = ImageDraw.Draw(glow)
-    gdraw.ellipse((-160, -220, 520, 340), fill=(70, 55, 20))
-    gdraw.ellipse((w - 480, h - 260, w + 200, h + 220), fill=(10, 60, 60))
-    glow = glow.filter(ImageFilter.GaussianBlur(120))
-    return Image.blend(base, glow, 0.45)
+    gdraw.ellipse((-200, -300, 620, 420), fill=(78, 60, 24))     # 좌상단 골드빛
+    gdraw.ellipse((w - 560, h - 340, w + 240, h + 260), fill=(14, 62, 70))  # 우하단 청록
+    gdraw.ellipse((w // 2 - 220, -160, w // 2 + 220, 280), fill=(40, 34, 76))
+    glow = glow.filter(ImageFilter.GaussianBlur(140))
+    return Image.blend(base, glow, 0.5)
 
 
 def _load_background() -> Image.Image:
+    """배경을 불러와 흐리게+어둡게 깐다.
+
+    배경 그림에 이미 큰 제목이 들어가 있어도 흐림 처리 덕분에 카드 내용과
+    부딪히지 않는다.
+    """
     path = Path(PROFILE_BACKGROUND)
+    source: Optional[Image.Image] = None
     if path.exists():
         try:
             with Image.open(path) as img:
-                return _cover(img.convert("RGB"), (WIDTH, HEIGHT))
+                source = _cover(img.convert("RGB"), (WIDTH, HEIGHT))
         except OSError as exc:
             log.warning("배경 이미지를 열 수 없습니다 (%s): %s", path, exc)
-    return _fallback_background((WIDTH, HEIGHT))
+    if source is None:
+        source = _fallback_background((WIDTH, HEIGHT))
+        canvas = source.convert("RGBA")
+    else:
+        canvas = source.filter(ImageFilter.GaussianBlur(5)).convert("RGBA")
+
+    canvas.alpha_composite(Image.new("RGBA", (WIDTH, HEIGHT), (6, 11, 28, 132)))
+    return canvas
+
+
+# ------------------------------------------------------------ 아바타
 
 
 def _circle_avatar(data: Optional[bytes], diameter: int) -> Image.Image:
-    """아바타를 원형으로 자르고 골드 링을 두른다."""
-    ring = 5
+    """아바타를 원형으로 자르고 밝은 링을 두른다."""
+    ring = 4
     total = diameter + ring * 2
     canvas = Image.new("RGBA", (total, total), (0, 0, 0, 0))
 
@@ -137,9 +262,9 @@ def _circle_avatar(data: Optional[bytes], diameter: int) -> Image.Image:
             with Image.open(io.BytesIO(data)) as img:
                 avatar = _cover(img.convert("RGB"), (diameter, diameter))
         except OSError:
-            avatar = Image.new("RGB", (diameter, diameter), (30, 40, 60))
+            avatar = Image.new("RGB", (diameter, diameter), (28, 36, 58))
     else:
-        avatar = Image.new("RGB", (diameter, diameter), (30, 40, 60))
+        avatar = Image.new("RGB", (diameter, diameter), (28, 36, 58))
 
     mask = Image.new("L", (diameter * 4, diameter * 4), 0)
     ImageDraw.Draw(mask).ellipse((0, 0, diameter * 4 - 1, diameter * 4 - 1), fill=255)
@@ -148,169 +273,339 @@ def _circle_avatar(data: Optional[bytes], diameter: int) -> Image.Image:
     canvas.paste(avatar, (ring, ring), mask)
     ImageDraw.Draw(canvas).ellipse(
         (ring // 2, ring // 2, total - ring // 2 - 1, total - ring // 2 - 1),
-        outline=GOLD,
+        outline=(246, 244, 238),
         width=ring,
     )
     return canvas
 
 
-def _fit(draw: ImageDraw.ImageDraw, text: str, font, max_width: int) -> str:
-    """가로 폭에 맞게 말줄임한다."""
-    if draw.textlength(text, font=font) <= max_width:
-        return text
-    ellipsis = "…"
-    trimmed = text
-    while trimmed and draw.textlength(trimmed + ellipsis, font=font) > max_width:
-        trimmed = trimmed[:-1]
-    return (trimmed + ellipsis) if trimmed else ellipsis
+# ------------------------------------------------------------ 티어 엠블럼
 
 
-def _chip(
+def _drawn_crest(tier_code: Optional[str], size: int) -> Image.Image:
+    """엠블럼 이미지가 없을 때 직접 그리는 크레스트 (날개 + 마름모)."""
+    color = TIER_COLORS.get(tier_code or "U", TIER_COLORS["U"])
+    dark = tuple(int(c * 0.42) for c in color)
+    light = tuple(min(255, int(c * 1.35)) for c in color)
+
+    scale = 4
+    s = size * scale
+    layer = Image.new("RGBA", (s, s), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(layer)
+
+    # 뒤쪽 글로우
+    glow = Image.new("RGBA", (s, s), (0, 0, 0, 0))
+    ImageDraw.Draw(glow).ellipse(
+        (s * 0.10, s * 0.10, s * 0.90, s * 0.90), fill=(*dark, 170)
+    )
+    glow = glow.filter(ImageFilter.GaussianBlur(s * 0.05))
+    layer.alpha_composite(glow)
+
+    # 좌우 날개
+    wing = [
+        (s * 0.06, s * 0.40),
+        (s * 0.40, s * 0.30),
+        (s * 0.45, s * 0.47),
+        (s * 0.12, s * 0.58),
+    ]
+    draw.polygon(wing, fill=(*color, 235))
+    draw.polygon([(s - x, y) for x, y in wing], fill=(*color, 235))
+
+    lower_wing = [
+        (s * 0.16, s * 0.62),
+        (s * 0.42, s * 0.55),
+        (s * 0.45, s * 0.68),
+        (s * 0.24, s * 0.76),
+    ]
+    draw.polygon(lower_wing, fill=(*dark, 240))
+    draw.polygon([(s - x, y) for x, y in lower_wing], fill=(*dark, 240))
+
+    # 가운데 마름모
+    diamond = [
+        (s * 0.50, s * 0.14),
+        (s * 0.69, s * 0.48),
+        (s * 0.50, s * 0.88),
+        (s * 0.31, s * 0.48),
+    ]
+    draw.polygon(diamond, fill=(*light, 245), outline=(*CREAM, 220), width=int(s * 0.012))
+    inner = [
+        (s * 0.50, s * 0.26),
+        (s * 0.61, s * 0.48),
+        (s * 0.50, s * 0.75),
+        (s * 0.39, s * 0.48),
+    ]
+    draw.polygon(inner, fill=(*dark, 220))
+
+    return layer.resize((size, size), Image.LANCZOS)
+
+
+@functools.lru_cache(maxsize=24)
+def _tier_emblem(tier_code: Optional[str], size: int) -> Image.Image:
+    """티어 엠블럼. `assets/tiers/` 에 이미지가 있으면 그것을 쓴다."""
+    slug = TIER_SLUGS.get(tier_code or "U", "unranked")
+    for name in (f"{slug}.png", f"{slug}.webp", f"{(tier_code or 'U').lower()}.png"):
+        path = TIER_EMBLEM_DIR / name
+        if not path.exists():
+            continue
+        try:
+            with Image.open(path) as img:
+                emblem = img.convert("RGBA")
+            emblem.thumbnail((size, size), Image.LANCZOS)
+            canvas = Image.new("RGBA", (size, size), (0, 0, 0, 0))
+            canvas.alpha_composite(
+                emblem, ((size - emblem.width) // 2, (size - emblem.height) // 2)
+            )
+            return canvas
+        except OSError as exc:
+            log.warning("티어 엠블럼을 열 수 없습니다 (%s): %s", path, exc)
+    return _drawn_crest(tier_code, size)
+
+
+# ------------------------------------------------------------ 구성 요소
+
+
+def _progress_bar(
+    canvas: Image.Image,
+    box: tuple[int, int, int, int],
+    ratio: float,
+    left: tuple[int, int, int],
+    right: tuple[int, int, int],
+) -> None:
+    """둥근 XP 게이지."""
+    x, y, w, h = box
+    radius = h // 2
+
+    track = Image.new("RGBA", (w, h), (0, 0, 0, 0))
+    track.putalpha(0)
+    track_layer = Image.new("RGBA", (w, h), BAR_TRACK)
+    track_layer.putalpha(_rounded_mask((w, h), radius).point(lambda v: v * BAR_TRACK[3] // 255))
+    canvas.alpha_composite(track_layer, (x, y))
+
+    ratio = max(0.0, min(1.0, ratio))
+    if ratio <= 0:
+        return
+    fill_w = max(h, int(w * ratio))  # 조금이라도 찼으면 최소한 동그라미만큼은 보이게
+    fill = _horizontal_gradient((fill_w, h), left, right)
+    fill.putalpha(_rounded_mask((fill_w, h), radius))
+    canvas.alpha_composite(fill, (x, y))
+
+
+def _level_row(
     canvas: Image.Image,
     draw: ImageDraw.ImageDraw,
-    box: tuple[int, int, int, int],
-    label: str,
-    value: str,
-    value_color: tuple[int, int, int],
+    *,
+    top: int,
+    left: int,
+    right: int,
+    title: str,
+    level: int,
+    current_xp: int,
+    needed_xp: int,
+    rank: Optional[int],
+    fill_left: tuple[int, int, int],
+    fill_right: tuple[int, int, int],
 ) -> None:
-    """라벨 + 값으로 이루어진 정보 칩 하나."""
-    x, y, w, h = box
-    chip = _rounded((w, h), 14, CHIP_FILL, outline=CHIP_EDGE, width=2)
-    canvas.alpha_composite(chip, (x, y))
-    draw.text((x + 16, y + 11), label, font=_font(17, bold=False), fill=MUTED)
-    value_font = _font(27)
-    draw.text(
-        (x + 16, y + 33),
-        _fit(draw, value, value_font, w - 32),
-        font=value_font,
-        fill=value_color,
+    """`음성 레벨 Lv.1 … #4위` 한 줄과 게이지."""
+    title_font = _font(26)
+    level_font = _font(23)
+    rank_font = _font(21)
+    xp_font = _font(17, bold=False)
+
+    draw.text((left, top), title, font=title_font, fill=CREAM)
+    offset = left + draw.textlength(title, font=title_font) + 14
+    draw.text((offset, top + 4), f"Lv. {level}", font=level_font, fill=GOLD_BRIGHT)
+
+    if rank is not None:
+        draw.text((right, top + 4), f"#{rank}위", font=rank_font, fill=CREAM, anchor="ra")
+
+    bar_y = top + 44
+    bar_h = 16
+    _progress_bar(
+        canvas, (left, bar_y, right - left, bar_h), current_xp / max(1, needed_xp),
+        fill_left, fill_right,
     )
+    draw.text(
+        (right, bar_y + bar_h + 8),
+        f"{current_xp:,} / {needed_xp:,} XP",
+        font=xp_font,
+        fill=MUTED,
+        anchor="ra",
+    )
+
+
+def _tier_box(
+    canvas: Image.Image,
+    draw: ImageDraw.ImageDraw,
+    *,
+    x: int,
+    y: int,
+    w: int,
+    h: int,
+    label: str,
+    tier_code: Optional[str],
+    tier_name: str,
+    record: str,
+) -> None:
+    """솔랭 / 자유랭크 티어 박스."""
+    box = _rounded((w, h), 18, BOX_FILL, outline=(*GOLD, 200), width=2)
+    canvas.alpha_composite(box, (x, y))
+
+    emblem_size = 112
+    emblem = _tier_emblem(tier_code, emblem_size)
+    canvas.alpha_composite(emblem, (x + 40, y + (h - emblem_size) // 2))
+
+    text_x = x + 40 + emblem_size + 26
+    max_w = x + w - 28 - text_x
+
+    draw.text((text_x, y + 58), label, font=_font(19, bold=False), fill=MUTED)
+    name_font = _font(34)
+    draw.text(
+        (text_x, y + 84),
+        _fit(draw, tier_name, name_font, max_w),
+        font=name_font,
+        fill=CREAM,
+    )
+    record_font = _font(18, bold=False)
+    draw.text(
+        (text_x, y + 138),
+        _fit(draw, record, record_font, max_w),
+        font=record_font,
+        fill=MUTED_WARM,
+    )
+
+
+# ---------------------------------------------------------------- 본체
 
 
 def render_profile_card(
     *,
     display_name: str,
-    user_tag: str,
     avatar_bytes: Optional[bytes],
     riot_id: Optional[str],
-    tier_code: Optional[str],
-    tier_label: str,
-    main_lane: str,
-    sub_lane: str,
     points: int,
-    warnings: int,
-    rank: Optional[int],
-    joined: str,
-    voice_time: str,
-    attendance: int,
+    voice_level: int,
+    voice_current_xp: int,
+    voice_needed_xp: int,
+    voice_rank: Optional[int],
+    chat_level: int,
+    chat_current_xp: int,
+    chat_needed_xp: int,
+    chat_rank: Optional[int],
+    solo_tier_code: Optional[str],
+    solo_tier_name: str,
+    solo_record: str,
+    flex_tier_code: Optional[str],
+    flex_tier_name: str,
+    flex_record: str,
 ) -> io.BytesIO:
     """프로필 카드를 그려 PNG 바이트로 돌려준다."""
-    background = _load_background().convert("RGBA")
-
-    # 배경을 살짝 어둡게 깔아 글자 대비를 확보
-    shade = Image.new("RGBA", (WIDTH, HEIGHT), (5, 10, 24, 110))
-    background.alpha_composite(shade)
-
-    canvas = background
+    canvas = _load_background()
     draw = ImageDraw.Draw(canvas)
 
-    # 바깥 골드 프레임
-    frame = _rounded((WIDTH - 12, HEIGHT - 12), 30, None, outline=(*GOLD_SOFT, 255), width=3)
-    canvas.alpha_composite(frame, (6, 6))
-
-    # 본문 패널
-    panel = _rounded((WIDTH - 48, HEIGHT - 48), 26, PANEL_FILL, outline=(*GOLD, 210), width=2)
-    canvas.alpha_composite(panel, (24, 24))
-
-    # ------------------------------------------------------------ 아바타
-    avatar_d = 156
-    avatar = _circle_avatar(avatar_bytes, avatar_d)
-    avatar_x = 64
-    avatar_y = 62
-    canvas.alpha_composite(avatar, (avatar_x, avatar_y))
-
-    # ------------------------------------------------- 슬로건 (우물 밖 → 롤 같이 하자)
-    slogan_font = _font(24)
-    slogan_w = int(draw.textlength(PROFILE_SLOGAN, font=slogan_font)) + 44
-    slogan_h = 44
-    slogan_x = avatar_x + (avatar_d + 10 - slogan_w) // 2
-    slogan_y = 300
-    pill = _rounded((slogan_w, slogan_h), slogan_h // 2, (*GOLD, 235))
-    canvas.alpha_composite(pill, (slogan_x, slogan_y))
-    draw.text(
-        (slogan_x + slogan_w // 2, slogan_y + slogan_h // 2),
-        PROFILE_SLOGAN,
-        font=slogan_font,
-        fill=NAVY,
-        anchor="mm",
+    # 바깥 골드 테두리
+    canvas.alpha_composite(
+        _rounded((WIDTH - 12, HEIGHT - 12), 28, None, outline=(*GOLD, 230), width=3),
+        (6, 6),
+    )
+    canvas.alpha_composite(
+        _rounded((WIDTH - 22, HEIGHT - 22), 24, None, outline=(*GOLD_DIM, 150), width=1),
+        (11, 11),
     )
 
-    # -------------------------------------------------------------- 이름
-    left = 254
-    right_limit = WIDTH - 48
-    name_font = _font(42)
+    # ------------------------------------------------------------ 머리말
+    avatar_d = 92
+    canvas.alpha_composite(_circle_avatar(avatar_bytes, avatar_d), (46, 30))
+
+    text_x = 156
+    points_box_x = 968
+    name_max_w = points_box_x - text_x - 28
+
+    draw.text((text_x, 26), PROFILE_SLOGAN, font=_font(20), fill=MUTED_WARM)
+
+    name_font = _font(44)
     draw.text(
-        (left, 52),
-        _fit(draw, display_name, name_font, right_limit - left),
+        (text_x - 2, 48),
+        _fit(draw, display_name, name_font, name_max_w),
         font=name_font,
         fill=CREAM,
     )
 
-    tag_font = _font(21, bold=False)
+    # 등록한 사람은 롤 계정을, 아직이면 시안의 영문 문구를 보여준다.
+    # 자간 벌리기는 영문 문구에만 어울리므로 롤 계정은 그냥 쓴다.
+    if riot_id:
+        riot_font = _font(18)
+        draw.text(
+            (text_x, 112),
+            _fit(draw, riot_id, riot_font, name_max_w),
+            font=riot_font,
+            fill=GOLD_BRIGHT,
+        )
+    else:
+        sub_font = _font(15, bold=False)
+        _tracked_text(
+            draw,
+            (text_x, 114),
+            _fit(draw, PROFILE_SUBTITLE, sub_font, name_max_w),
+            sub_font,
+            MUTED,
+            spacing=2.4,
+        )
+
+    # ------------------------------------------------------- 보유 포인트
+    pb_w, pb_h = 188, 70
+    canvas.alpha_composite(
+        _rounded((pb_w, pb_h), 14, BOX_FILL, outline=(*GOLD, 215), width=2),
+        (points_box_x, 26),
+    )
     draw.text(
-        (left, 104),
-        _fit(draw, user_tag, tag_font, right_limit - left),
-        font=tag_font,
-        fill=MUTED,
+        (points_box_x + pb_w - 20, 38), "보유 포인트",
+        font=_font(17, bold=False), fill=MUTED, anchor="ra",
     )
-
-    riot_font = _font(25)
-    riot_text = riot_id or "롤 계정 미등록 · /등록 으로 등록해 주세요"
+    points_text = f"{points:,} P"
     draw.text(
-        (left, 132),
-        _fit(draw, riot_text, riot_font, right_limit - left),
-        font=riot_font,
-        fill=TEAL if riot_id else MUTED,
+        (points_box_x + pb_w - 20, 58), points_text,
+        font=_shrink_to_fit(draw, points_text, pb_w - 40, 30, 17),
+        fill=CREAM, anchor="ra",
     )
 
-    # 구분선
-    draw.line([(left, 174), (right_limit, 174)], fill=(*GOLD_SOFT, 255), width=2)
-
-    # -------------------------------------------------------------- 정보 칩
-    chip_w, chip_h, gap = 218, 70, 15
-    xs = [left + i * (chip_w + gap) for i in range(3)]
-
-    tier_color = TIER_COLORS.get(tier_code or "", CREAM)
-    _chip(canvas, draw, (xs[0], 188, chip_w, chip_h), "티어", tier_label, tier_color)
-    _chip(canvas, draw, (xs[1], 188, chip_w, chip_h), "주 라인", main_lane, CREAM)
-    _chip(canvas, draw, (xs[2], 188, chip_w, chip_h), "부 라인", sub_lane, CREAM)
-
-    _chip(canvas, draw, (xs[0], 270, chip_w, chip_h), "포인트", f"{points:,} P", GOLD)
-    _chip(
-        canvas,
-        draw,
-        (xs[1], 270, chip_w, chip_h),
-        "경고",
-        f"{warnings}회",
-        DANGER if warnings else CREAM,
-    )
-    _chip(
-        canvas,
-        draw,
-        (xs[2], 270, chip_w, chip_h),
-        "포인트 순위",
-        f"{rank}위" if rank else "-",
-        TEAL,
+    # --------------------------------------------------------- 레벨 패널
+    panel_x, panel_y = 44, 160
+    panel_w, panel_h = WIDTH - panel_x * 2, 268
+    canvas.alpha_composite(
+        _rounded((panel_w, panel_h), 20, PANEL_FILL, outline=(*GOLD_DIM, 170), width=1),
+        (panel_x, panel_y),
     )
 
-    # -------------------------------------------------------------- 하단 정보
-    footer_font = _font(19, bold=False)
-    footer = f"서버 입장 {joined}   ·   음성 활동 {voice_time}   ·   출석 {attendance}일"
-    draw.text(
-        (left, 356),
-        _fit(draw, footer, footer_font, right_limit - left),
-        font=footer_font,
-        fill=MUTED,
+    row_left = panel_x + 32
+    row_right = panel_x + panel_w - 32
+
+    _level_row(
+        canvas, draw,
+        top=panel_y + 26, left=row_left, right=row_right,
+        title="음성 레벨", level=voice_level,
+        current_xp=voice_current_xp, needed_xp=voice_needed_xp, rank=voice_rank,
+        fill_left=GOLD, fill_right=GOLD_BRIGHT,
+    )
+    _level_row(
+        canvas, draw,
+        top=panel_y + 140, left=row_left, right=row_right,
+        title="채팅 레벨", level=chat_level,
+        current_xp=chat_current_xp, needed_xp=chat_needed_xp, rank=chat_rank,
+        fill_left=BLUE, fill_right=BLUE_BRIGHT,
+    )
+
+    # --------------------------------------------------------- 티어 박스
+    box_y, box_h = 458, 232
+    box_w = (WIDTH - 44 * 2 - 16) // 2
+    _tier_box(
+        canvas, draw, x=44, y=box_y, w=box_w, h=box_h,
+        label="롤 솔랭 티어", tier_code=solo_tier_code,
+        tier_name=solo_tier_name, record=solo_record,
+    )
+    _tier_box(
+        canvas, draw, x=44 + box_w + 16, y=box_y, w=box_w, h=box_h,
+        label="롤 자유랭크 티어", tier_code=flex_tier_code,
+        tier_name=flex_tier_name, record=flex_record,
     )
 
     buffer = io.BytesIO()

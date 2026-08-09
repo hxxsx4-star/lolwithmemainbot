@@ -5,7 +5,7 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 
-from config import Channels, Colors, Economy, Roles, Warning as WarnConfig
+from config import Channels, Colors, Economy, Level, Roles, Warning as WarnConfig
 from core.checks import can_moderate, is_staff
 
 GENERAL_SECTIONS: list[tuple[str, str]] = [
@@ -26,8 +26,18 @@ GENERAL_SECTIONS: list[tuple[str, str]] = [
         f"{Economy.VOICE_REWARD}{Economy.UNIT}** 가 자동으로 쌓입니다.",
     ),
     (
+        "📈 레벨",
+        f"`/레벨 [유저]` 음성 · 채팅 레벨 확인\n"
+        f"`/레벨랭킹 [음성|채팅]` 레벨 상위 10명\n"
+        f"→ 음성 채널에 있으면 **분당 {Level.VOICE_XP_PER_MINUTE}XP** 가 자동으로 쌓입니다. "
+        f"(Lv.0→1 은 {Level.BASE_XP}XP, 약 4시간)\n"
+        f"→ 채팅은 메시지당 **{Level.CHAT_XP_PER_MESSAGE}XP** "
+        f"({Level.CHAT_COOLDOWN_SECONDS}초 쿨타임)",
+    ),
+    (
         "🪪 프로필",
-        "`/프로필 [유저]` 티어 · 라인 · 포인트 · 경고가 담긴 프로필 카드를 봅니다",
+        "`/프로필 [유저]` 포인트 · 음성/채팅 레벨 · 솔랭/자유랭크 티어가 담긴 "
+        "프로필 카드를 봅니다",
     ),
     (
         "⚔️ 내전",

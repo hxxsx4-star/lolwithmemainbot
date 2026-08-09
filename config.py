@@ -127,6 +127,26 @@ class Economy:
     IGNORE_AFK_CHANNEL = True    # 잠수 채널은 적립 제외
 
 
+class Level:
+    """레벨 시스템 수치.
+
+    누구나 Lv.0 에서 시작하고, 필요 경험치는 `BASE_XP + STEP_XP × 현재레벨` 로
+    조금씩 늘어난다. (Lv.0→1 = 600XP, Lv.1→2 = 655XP, Lv.2→3 = 710XP …)
+    """
+
+    BASE_XP = 600
+    STEP_XP = 55
+
+    # 음성: 음성 채널에 있으면 자동으로 오른다. 분당 2.5XP → Lv.1 까지 4시간.
+    VOICE_XP_PER_MINUTE = 2.5
+
+    # 채팅: 도배로 올리지 못하도록 쿨타임과 최소 길이를 둔다.
+    # 10XP × 쿨타임 60초 → Lv.1 까지 최소 60분(60개). 음성 4시간과 비슷한 무게.
+    CHAT_XP_PER_MESSAGE = 10
+    CHAT_COOLDOWN_SECONDS = 60
+    CHAT_MIN_LENGTH = 2
+
+
 class Warning:
     """경고 시스템 수치."""
 
@@ -149,8 +169,15 @@ class Colors:
 # 프로필 카드 배경 이미지 (없으면 자동으로 그라데이션 배경을 생성)
 PROFILE_BACKGROUND = ASSET_DIR / os.getenv("PROFILE_BACKGROUND", "profile_bg.png")
 
+# 티어 엠블럼 이미지 폴더 (assets/tiers/master.png 형태)
+TIER_EMBLEM_DIR = ASSET_DIR / "tiers"
+
 # 프로필 카드 문구
 PROFILE_SLOGAN = "롤 같이 하자"
+PROFILE_SUBTITLE = "PLAY TOGETHER, WIN TOGETHER."
+
+# 라이엇 랭크 정보를 다시 조회하기까지의 간격 (초)
+RANK_CACHE_SECONDS = 600
 
 # 한글 폰트 후보. 위에서부터 존재하는 것을 사용한다.
 FONT_CANDIDATES: tuple[Path | str, ...] = (

@@ -31,3 +31,22 @@ assets/fonts/Pretendard-Regular.ttf
 ```bash
 sudo apt install fonts-nanum
 ```
+
+## 티어 엠블럼
+
+프로필 카드 하단의 솔랭/자유랭크 박스에 쓸 티어 엠블럼입니다.
+`assets/tiers/` 안에 아래 이름으로 넣어 주세요.
+
+```
+iron.png  bronze.png  silver.png  gold.png  platinum.png
+emerald.png  diamond.png  master.png  grandmaster.png  challenger.png
+```
+
+아래 스크립트로 한 번에 받을 수 있습니다.
+
+```bash
+python scripts/download_tier_emblems.py
+```
+
+엠블럼이 하나도 없어도 봇은 티어 색으로 크레스트를 직접 그려서 표시하므로,
+카드가 비어 보이지는 않습니다.

@@ -224,3 +224,6 @@ assets/fonts/*.ttf
 assets/fonts/*.otf
 assets/fonts/*.ttc
 !assets/fonts/.gitkeep
+assets/tiers/*.png
+assets/tiers/*.webp
+!assets/tiers/.gitkeep

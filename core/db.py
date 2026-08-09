@@ -6,12 +6,13 @@
 from __future__ import annotations
 
 import datetime as dt
+import json
 from dataclasses import dataclass
 from typing import Any, Iterable, Optional
 
 import aiosqlite
 
-from config import DB_PATH, TIMEZONE
+from config import DB_PATH, Level, TIMEZONE
 
 SCHEMA = """
 PRAGMA journal_mode=WAL;
@@ -27,7 +28,12 @@ CREATE TABLE IF NOT EXISTS users (
     riot_tag_line  TEXT,
     riot_puuid     TEXT,
     registered_at  TEXT,
-    registered_by  INTEGER
+    registered_by  INTEGER,
+    voice_xp       INTEGER NOT NULL DEFAULT 0,
+    chat_xp        INTEGER NOT NULL DEFAULT 0,
+    rank_solo      TEXT,
+    rank_flex      TEXT,
+    rank_updated_at TEXT
 );
 
 CREATE TABLE IF NOT EXISTS point_log (
@@ -102,6 +108,21 @@ def iso() -> str:
     return now().isoformat(timespec="seconds")
 
 
+def xp_for_level(level: int) -> int:
+    """`level` 에서 다음 레벨로 올라가는 데 필요한 경험치."""
+    return Level.BASE_XP + Level.STEP_XP * max(0, level)
+
+
+def level_progress(total_xp: int) -> tuple[int, int, int]:
+    """누적 경험치를 (레벨, 현재 레벨에서 모은 XP, 다음 레벨까지 필요한 XP) 로."""
+    level = 0
+    remaining = max(0, total_xp)
+    while remaining >= xp_for_level(level):
+        remaining -= xp_for_level(level)
+        level += 1
+    return level, remaining, xp_for_level(level)
+
+
 @dataclass(slots=True)
 class UserRow:
     """users 테이블 한 줄."""
@@ -117,6 +138,11 @@ class UserRow:
     riot_puuid: Optional[str] = None
     registered_at: Optional[str] = None
     registered_by: Optional[int] = None
+    voice_xp: int = 0
+    chat_xp: int = 0
+    rank_solo: Optional[str] = None
+    rank_flex: Optional[str] = None
+    rank_updated_at: Optional[str] = None
 
     @property
     def riot_id(self) -> Optional[str]:
@@ -127,6 +153,40 @@ class UserRow:
     @property
     def registered(self) -> bool:
         return self.riot_id is not None
+
+    @property
+    def voice_level(self) -> tuple[int, int, int]:
+        return level_progress(self.voice_xp)
+
+    @property
+    def chat_level(self) -> tuple[int, int, int]:
+        return level_progress(self.chat_xp)
+
+    def _rank(self, raw: Optional[str]) -> Optional[dict]:
+        if not raw:
+            return None
+        try:
+            return json.loads(raw)
+        except (ValueError, TypeError):
+            return None
+
+    @property
+    def solo_rank(self) -> Optional[dict]:
+        return self._rank(self.rank_solo)
+
+    @property
+    def flex_rank(self) -> Optional[dict]:
+        return self._rank(self.rank_flex)
+
+    def rank_is_fresh(self, max_age_seconds: int) -> bool:
+        """캐시된 랭크 정보를 그대로 써도 되는지."""
+        if not self.rank_updated_at:
+            return False
+        try:
+            updated = dt.datetime.fromisoformat(self.rank_updated_at)
+        except ValueError:
+            return False
+        return (now() - updated).total_seconds() < max_age_seconds
 
 
 class Database:
@@ -141,6 +201,27 @@ class Database:
         self._conn.row_factory = aiosqlite.Row
         await self._conn.executescript(SCHEMA)
         await self._conn.commit()
+        await self._migrate()
+
+    async def _migrate(self) -> None:
+        """예전 버전에서 만들어진 DB 에 빠진 컬럼을 채워 넣는다."""
+        additions = {
+            "voice_xp": "INTEGER NOT NULL DEFAULT 0",
+            "chat_xp": "INTEGER NOT NULL DEFAULT 0",
+            "rank_solo": "TEXT",
+            "rank_flex": "TEXT",
+            "rank_updated_at": "TEXT",
+        }
+        async with self.conn.execute("PRAGMA table_info(users)") as cur:
+            existing = {row["name"] for row in await cur.fetchall()}
+
+        for column, definition in additions.items():
+            if column in existing:
+                continue
+            await self.conn.execute(
+                f"ALTER TABLE users ADD COLUMN {column} {definition}"
+            )
+        await self.conn.commit()
 
     async def close(self) -> None:
         if self._conn is not None:
@@ -256,6 +337,64 @@ class Database:
             (seconds, user_id),
         )
 
+    # ------------------------------------------------------------- 레벨
+
+    async def add_xp(self, user_id: int, column: str, amount: int) -> tuple[int, int]:
+        """경험치를 더하고 (이전 레벨, 새 레벨) 을 돌려준다."""
+        if column not in ("voice_xp", "chat_xp"):
+            raise ValueError(f"알 수 없는 경험치 종류: {column}")
+        await self.ensure_user(user_id)
+        row = await self._fetchone(
+            f"SELECT {column} AS xp FROM users WHERE user_id = ?", (user_id,)
+        )
+        before = int(row["xp"]) if row else 0
+        after = before + max(0, amount)
+        await self._exec(
+            f"UPDATE users SET {column} = ? WHERE user_id = ?", (after, user_id)
+        )
+        return level_progress(before)[0], level_progress(after)[0]
+
+    async def xp_rank(self, user_id: int, column: str) -> Optional[int]:
+        """해당 경험치 기준 순위 (1등부터)."""
+        if column not in ("voice_xp", "chat_xp"):
+            raise ValueError(f"알 수 없는 경험치 종류: {column}")
+        exists = await self._fetchone("SELECT 1 FROM users WHERE user_id = ?", (user_id,))
+        if exists is None:
+            return None
+        row = await self._fetchone(
+            f"SELECT COUNT(*) + 1 AS rank FROM users"
+            f" WHERE {column} > (SELECT {column} FROM users WHERE user_id = ?)",
+            (user_id,),
+        )
+        return int(row["rank"]) if row else None
+
+    async def top_xp(self, column: str, limit: int = 10) -> list[aiosqlite.Row]:
+        if column not in ("voice_xp", "chat_xp"):
+            raise ValueError(f"알 수 없는 경험치 종류: {column}")
+        return await self._fetchall(
+            f"SELECT user_id, {column} AS xp FROM users WHERE {column} > 0"
+            f" ORDER BY {column} DESC, user_id ASC LIMIT ?",
+            (limit,),
+        )
+
+    # --------------------------------------------------------- 랭크 캐시
+
+    async def set_riot_ranks(
+        self, user_id: int, solo: Optional[dict], flex: Optional[dict]
+    ) -> None:
+        """라이엇에서 받아온 솔랭/자유랭크 정보를 캐시한다."""
+        await self.ensure_user(user_id)
+        await self._exec(
+            "UPDATE users SET rank_solo = ?, rank_flex = ?, rank_updated_at = ?"
+            " WHERE user_id = ?",
+            (
+                json.dumps(solo, ensure_ascii=False) if solo else None,
+                json.dumps(flex, ensure_ascii=False) if flex else None,
+                iso(),
+                user_id,
+            ),
+        )
+
     # ------------------------------------------------------------- 경고
 
     async def add_warning(
@@ -303,16 +442,20 @@ class Database:
         actor_id: int,
     ) -> None:
         await self.ensure_user(user_id)
+        # 계정이 바뀌면 캐시된 랭크 정보는 더 이상 이 사람 것이 아니다
         await self._exec(
             "UPDATE users SET riot_game_name = ?, riot_tag_line = ?, riot_puuid = ?,"
-            " registered_at = ?, registered_by = ? WHERE user_id = ?",
+            " registered_at = ?, registered_by = ?,"
+            " rank_solo = NULL, rank_flex = NULL, rank_updated_at = NULL"
+            " WHERE user_id = ?",
             (game_name, tag_line, puuid, iso(), actor_id, user_id),
         )
 
     async def clear_riot_account(self, user_id: int) -> None:
         await self._exec(
             "UPDATE users SET riot_game_name = NULL, riot_tag_line = NULL,"
-            " riot_puuid = NULL, registered_at = NULL, registered_by = NULL"
+            " riot_puuid = NULL, registered_at = NULL, registered_by = NULL,"
+            " rank_solo = NULL, rank_flex = NULL, rank_updated_at = NULL"
             " WHERE user_id = ?",
             (user_id,),
         )

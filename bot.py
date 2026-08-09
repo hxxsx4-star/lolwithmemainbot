@@ -15,6 +15,7 @@ from utils.riot import RiotClient
 
 EXTENSIONS = (
     "cogs.economy",
+    "cogs.leveling",
     "cogs.warning",
     "cogs.riot_register",
     "cogs.ticket",
