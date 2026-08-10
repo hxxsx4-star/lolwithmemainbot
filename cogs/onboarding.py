@@ -13,13 +13,23 @@
 from __future__ import annotations
 
 import asyncio
+import datetime as dt
 import logging
 
 import discord
 from discord import app_commands
-from discord.ext import commands
+from discord.ext import commands, tasks
 
-from config import Channels, Colors, GUILD_ID, Roles
+from config import (
+    Channels,
+    Colors,
+    GUILD_ID,
+    Roles,
+    TIMEZONE,
+    VERIFY_REMINDER_HOURS,
+    VERIFY_REMINDER_REPLACE,
+    VERIFY_REMINDER_TEXT,
+)
 from core.checks import staff_only
 from core.registration import register_riot_account
 from utils.logs import base_embed, truncate
@@ -34,6 +44,11 @@ from utils.roles import (
 )
 
 log = logging.getLogger("mainbot.onboarding")
+
+REMINDER_TIMES = [dt.time(hour=h, tzinfo=TIMEZONE) for h in VERIFY_REMINDER_HOURS]
+
+# 직전에 올린 안내 메시지를 기억해 두는 키 (panels 테이블 재사용)
+REMINDER_PANEL_KEY = "verify_reminder"
 
 GUIDE = (
     "**양식**  `롤닉네임#태그/올해최고티어/주라인 부라인`\n"
@@ -52,6 +67,94 @@ class Onboarding(commands.Cog, name="Onboarding"):
         self._startup_done = False
         # 같은 사람이 연달아 올린 소개가 겹쳐 처리되는 것을 막는다
         self._processing: set[int] = set()
+
+    async def cog_load(self) -> None:
+        self.verify_reminder.start()
+
+    async def cog_unload(self) -> None:
+        self.verify_reminder.cancel()
+
+    # ------------------------------------------------------- 인증 안내 재공지
+
+    @tasks.loop(time=REMINDER_TIMES)
+    async def verify_reminder(self) -> None:
+        for guild in self.bot.guilds:
+            if GUILD_ID is not None and guild.id != GUILD_ID:
+                continue
+            try:
+                await self.post_verify_reminder(guild)
+            except Exception:
+                log.exception("[%s] 인증 안내 전송 실패", guild.name)
+
+    @verify_reminder.before_loop
+    async def before_verify_reminder(self) -> None:
+        await self.bot.wait_until_ready()
+
+    async def post_verify_reminder(
+        self, guild: discord.Guild
+    ) -> discord.Message | None:
+        """소개 채널에 미등록 역할을 멘션하며 인증 안내를 올린다."""
+        channel = guild.get_channel(Channels.ONBOARDING)
+        if not isinstance(channel, discord.abc.Messageable):
+            log.warning("소개 채널(%s)을 찾을 수 없습니다.", Channels.ONBOARDING)
+            return None
+
+        role = guild.get_role(Roles.UNREGISTERED)
+        if role is None:
+            log.warning("미등록 역할(%s)을 찾을 수 없습니다.", Roles.UNREGISTERED)
+            return None
+
+        # 역할 멘션이 실제로 울리려면 역할이 '멘션 허용'이거나 봇에게 권한이 있어야 한다
+        me = guild.me
+        if not role.mentionable and not (
+            me is not None and me.guild_permissions.mention_everyone
+        ):
+            log.warning(
+                "미등록 역할이 '멘션 허용'이 아니고 봇에게 everyone 멘션 권한도 없어"
+                " 알림이 울리지 않습니다. 역할 설정을 확인해 주세요."
+            )
+
+        embed = base_embed(
+            "📝 서버 인증 안내",
+            Colors.GOLD,
+            description=VERIFY_REMINDER_TEXT,
+        )
+        embed.add_field(name="양식", value=GUIDE, inline=False)
+
+        try:
+            message = await channel.send(
+                content=role.mention,
+                embed=embed,
+                allowed_mentions=discord.AllowedMentions(roles=[role]),
+            )
+        except discord.Forbidden:
+            log.warning("소개 채널에 메시지를 보낼 권한이 없습니다.")
+            return None
+        except discord.HTTPException as exc:
+            log.warning("인증 안내 전송 실패: %s", exc)
+            return None
+
+        # 직전 안내는 지워서 채널이 안내로 도배되지 않게 한다
+        if VERIFY_REMINDER_REPLACE:
+            previous = await self.bot.db.get_panel(REMINDER_PANEL_KEY)
+            if previous is not None:
+                await self._delete_message(
+                    int(previous["channel_id"]), int(previous["message_id"])
+                )
+        await self.bot.db.set_panel(
+            REMINDER_PANEL_KEY, guild.id, channel.id, message.id
+        )
+        return message
+
+    async def _delete_message(self, channel_id: int, message_id: int) -> None:
+        channel = self.bot.get_channel(channel_id)
+        if not isinstance(channel, discord.abc.Messageable):
+            return
+        try:
+            message = await channel.fetch_message(message_id)
+            await message.delete()
+        except (discord.NotFound, discord.Forbidden, discord.HTTPException):
+            pass
 
     # ------------------------------------------------- 시작할 때 자동 동기화
 
@@ -182,7 +285,7 @@ class Onboarding(commands.Cog, name="Onboarding"):
     async def _apply_intro(self, message, member, parsed, problems) -> None:
         """소개 한 건을 닉네임 → 역할 → 계정 등록 순서로 처리한다."""
         # 1) 서버 닉네임을 양식 그대로 맞춘다
-        nickname = parsed.raw[:32]
+        nickname = parsed.canonical[:32]
         if member.display_name != nickname:
             try:
                 await member.edit(nick=nickname, reason="닉네임 양식 등록")
@@ -370,6 +473,26 @@ class Onboarding(commands.Cog, name="Onboarding"):
             inline=False,
         )
         await interaction.followup.send(embed=embed, ephemeral=True)
+
+    @app_commands.command(
+        name="인증안내",
+        description="[관리자] 소개 채널에 인증 안내를 지금 바로 올립니다.",
+    )
+    @staff_only()
+    async def send_reminder(self, interaction: discord.Interaction) -> None:
+        guild = interaction.guild
+        if guild is None:
+            return
+        await interaction.response.defer(ephemeral=True)
+        message = await self.post_verify_reminder(guild)
+        if message is None:
+            await interaction.followup.send(
+                "인증 안내를 올리지 못했습니다. 봇 로그를 확인해 주세요.", ephemeral=True
+            )
+            return
+        await interaction.followup.send(
+            f"✅ 인증 안내를 올렸습니다 → [바로가기]({message.jump_url})", ephemeral=True
+        )
 
     @app_commands.command(name="양식안내", description="닉네임 등록 양식을 안내합니다.")
     async def guide(self, interaction: discord.Interaction) -> None:

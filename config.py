@@ -214,6 +214,20 @@ class Colors:
     INFO = 0x5865F2
 
 
+# 소개 채널에 인증 안내를 다시 올릴 시각 (KST). 기본 00 · 06 · 12 · 18시
+VERIFY_REMINDER_HOURS: tuple[int, ...] = (0, 6, 12, 18)
+
+# 인증 안내 문구. 앞에 미등록 역할 멘션이 자동으로 붙는다.
+VERIFY_REMINDER_TEXT = (
+    '"롤닉#태그/이번년도최고티어(영어로)/주라인(영어로) 부라인(영어로)" '
+    "로 쓰시면 자동 인증됩니다!\n"
+    "인증하지 않을 시 서버 이용에 제한이 있으니 양해 부탁드립니다."
+)
+
+# 새 안내를 올릴 때 직전 안내를 지울지 (채널이 안내로 도배되는 것을 막는다)
+VERIFY_REMINDER_REPLACE = True
+
+
 # 프로필 카드 배경 이미지 (없으면 자동으로 그라데이션 배경을 생성)
 PROFILE_BACKGROUND = ASSET_DIR / os.getenv("PROFILE_BACKGROUND", "profile_bg.png")
 
