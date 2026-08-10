@@ -19,6 +19,12 @@ from config import LANE_NAMES, TIER_NAMES
 TIER_CODES = ("GM", "C", "M", "D", "E", "P", "G", "S", "B", "I", "U")
 TIER_PATTERN = re.compile(rf"^({'|'.join(TIER_CODES)})(\d+)?$")
 
+# 마스터 이상은 단계가 없고 LP 만 있다. 그 아래는 1~4 단계로 나뉜다.
+# 즉 `M405` 는 마스터 405LP 지만 `E4` 는 에메랄드 4단계다.
+APEX_TIERS = frozenset({"M", "GM", "C"})
+MAX_DIVISION = 4
+MAX_LP = 9999
+
 LANE_CODES = ("TOP", "JG", "MID", "AD", "SUP")
 
 # 자주 쓰는 다른 표기 → 올바른 약자. 통과시키지는 않고 "이렇게 적어 주세요" 로 안내한다.
@@ -96,7 +102,7 @@ class ProfileFormat:
     game_name: str
     tag_line: str
     tier: str                # 약자 (예: "M")
-    lp: Optional[int]        # 티어 뒤 숫자 (없으면 None)
+    number: Optional[int]    # 티어 뒤 숫자. 마스터 이상이면 LP, 아니면 단계
     main_lane: str           # 약자 (예: "MID")
     sub_lane: Optional[str]  # 약자 (예: "AD")
     raw: str
@@ -106,15 +112,39 @@ class ProfileFormat:
         return f"{self.game_name}#{self.tag_line}"
 
     @property
+    def is_apex(self) -> bool:
+        """마스터 · 그랜드마스터 · 챌린저인지 (단계 없이 LP 만 있는 구간)."""
+        return self.tier in APEX_TIERS
+
+    @property
+    def lp(self) -> Optional[int]:
+        """리그 포인트. 마스터 이상에서만 의미가 있다."""
+        return self.number if self.is_apex else None
+
+    @property
+    def division(self) -> Optional[int]:
+        """티어 단계(1~4). 마스터 미만에서만 의미가 있다."""
+        return None if self.is_apex else self.number
+
+    @property
     def canonical(self) -> str:
         """서버 닉네임으로 쓸 정규 표기."""
-        tier = f"{self.tier}{self.lp}" if self.lp is not None else self.tier
+        tier = f"{self.tier}{self.number}" if self.number is not None else self.tier
         lanes = self.main_lane + (f" {self.sub_lane}" if self.sub_lane else "")
         return f"{self.riot_id}/{tier}/{lanes}"
 
     @property
     def tier_name(self) -> str:
         return TIER_NAMES.get(self.tier, self.tier)
+
+    @property
+    def tier_display(self) -> str:
+        """사람에게 보여줄 티어 표기. `마스터 405LP` / `에메랄드 4`."""
+        if self.number is None:
+            return self.tier_name
+        if self.is_apex:
+            return f"{self.tier_name} {self.number}LP"
+        return f"{self.tier_name} {self.number}"
 
     @property
     def main_lane_name(self) -> str:
@@ -130,6 +160,30 @@ class ProfileFormat:
 # ------------------------------------------------------------------ 티어
 
 
+def _check_tier_number(code: str, number: Optional[int]) -> Optional[str]:
+    """티어 뒤 숫자가 그 티어에 맞는 값인지 확인한다.
+
+    마스터 이상은 LP, 그 아래는 1~4 단계다. 같은 자리에 오는 숫자지만 뜻이
+    다르므로 여기서 갈라 준다.
+    """
+    if number is None:
+        return None
+
+    name = TIER_NAMES.get(code, code)
+    if code == "U":
+        return f"언랭크는 뒤에 숫자를 붙이지 않습니다. `{code}{number}` → **`U`**"
+    if code in APEX_TIERS:
+        if number > MAX_LP:
+            return f"{name}의 LP `{number}` 가 너무 큽니다. (예: `{code}405`)"
+        return None
+    if not 1 <= number <= MAX_DIVISION:
+        return (
+            f"{name}는 **1~{MAX_DIVISION} 단계**입니다. `{code}{number}` 는 없습니다.\n"
+            f"　(가장 높은 단계가 1입니다. 예: `{code}1`)"
+        )
+    return None
+
+
 def _check_tier(part: str) -> tuple[Optional[str], Optional[int], Optional[str]]:
     """티어 조각을 확인한다. (약자, LP, 오류 메시지)"""
     raw = part.replace(" ", "")
@@ -138,7 +192,9 @@ def _check_tier(part: str) -> tuple[Optional[str], Optional[int], Optional[str]]
 
     match = TIER_PATTERN.match(raw)
     if match is not None:
-        return match.group(1), int(match.group(2)) if match.group(2) else None, None
+        code = match.group(1)
+        number = int(match.group(2)) if match.group(2) else None
+        return (code, number, _check_tier_number(code, number))
 
     # 소문자로 썼는지 먼저 확인한다 (mid, gm 처럼 흔한 실수)
     upper = TIER_PATTERN.match(raw.upper())
@@ -162,8 +218,8 @@ def _check_tier(part: str) -> tuple[Optional[str], Optional[int], Optional[str]]
 
     return None, None, (
         f"티어 `{raw}` 를 알아볼 수 없습니다. "
-        "`U I B S G P E D M GM C` 중 하나를 **대문자**로 적어 주세요. "
-        "(마스터 이상은 뒤에 LP 를 붙일 수 있습니다: `M405`)"
+        "`U I B S G P E D M GM C` 중 하나를 **대문자**로 적어 주세요.\n"
+        "　(아이언~다이아는 뒤에 단계 1~4: `E4`, 마스터 이상은 LP: `M405`)"
     )
 
 
@@ -256,7 +312,7 @@ def parse_profile_format(text: str) -> ProfileFormat:
             issues.append(TAG_ERROR + f" (지금: `{tag_line}`)")
 
     # 2) 티어
-    tier, lp, tier_error = _check_tier(tier_part)
+    tier, number, tier_error = _check_tier(tier_part)
     if tier_error:
         issues.append(tier_error)
 
@@ -271,7 +327,7 @@ def parse_profile_format(text: str) -> ProfileFormat:
         game_name=game_name,
         tag_line=tag_line,
         tier=tier,           # type: ignore[arg-type]
-        lp=lp,
+        number=number,
         main_lane=main_lane,  # type: ignore[arg-type]
         sub_lane=sub_lane,
         raw=raw,

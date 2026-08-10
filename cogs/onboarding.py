@@ -55,7 +55,9 @@ GUIDE = (
     "**예시**  `홍길동#KR1/M405/MID AD`\n\n"
     "**티어** 언랭 `U` · 아이언 `I` · 브론즈 `B` · 실버 `S` · 골드 `G` · "
     "플래티넘 `P` · 에메랄드 `E` · 다이아 `D` · 마스터 `M` · 그마 `GM` · 챌린저 `C`\n"
-    "**라인** 탑 `TOP` · 정글 `JG` · 미드 `MID` · 원딜 `AD` · 서폿 `SUP`"
+    "**라인** 탑 `TOP` · 정글 `JG` · 미드 `MID` · 원딜 `AD` · 서폿 `SUP`\n"
+    "**숫자** 아이언~다이아는 **단계 1~4** (`E4` = 에메랄드 4), "
+    "마스터 이상은 **LP** (`M405` = 마스터 405LP)"
 )
 
 
@@ -348,8 +350,9 @@ class Onboarding(commands.Cog, name="Onboarding"):
             description=f"{member.mention} 님, 환영합니다!",
         )
         embed.add_field(name="닉네임", value=f"`{nickname}`", inline=False)
-        tier_text = parsed.tier_name + (f" {parsed.lp}LP" if parsed.lp is not None else "")
-        embed.add_field(name="티어", value=f"{tier_text} (`{parsed.tier}`)", inline=True)
+        embed.add_field(
+            name="티어", value=f"{parsed.tier_display} (`{parsed.tier}`)", inline=True
+        )
         embed.add_field(name="주 라인", value=lane_label(parsed.main_lane), inline=True)
         embed.add_field(name="부 라인", value=lane_label(parsed.sub_lane), inline=True)
 

@@ -93,13 +93,17 @@ class Profile(commands.Cog, name="Profile"):
 
         # 라이엇 정보가 없으면 역할/닉네임 양식에 적힌 티어라도 보여준다
         if solo is None:
-            fallback = tier_of(target)
-            if fallback is None:
-                try:
-                    fallback = parse_profile_format(target.display_name).tier
-                except FormatError:
-                    fallback = None
-            if fallback is not None:
+            # 닉네임 양식이 있으면 단계/LP 까지 살려서 쓴다 (`E4` → 에메랄드 4)
+            try:
+                parsed = parse_profile_format(target.display_name)
+            except FormatError:
+                parsed = None
+
+            if parsed is not None:
+                solo_code = parsed.tier
+                solo_name = parsed.tier_display
+                solo_record = "서버 등록 티어 기준"
+            elif (fallback := tier_of(target)) is not None:
                 solo_code = fallback
                 solo_name = TIER_NAMES.get(fallback, solo_name)
                 solo_record = "서버 등록 티어 기준"
