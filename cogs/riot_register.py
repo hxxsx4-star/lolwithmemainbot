@@ -14,10 +14,10 @@ from discord.ext import commands
 
 from config import Channels, Colors
 from core.checks import is_staff
+from core.registration import register_riot_account
 from utils.logs import base_embed, send_log, truncate, user_field
 from utils.parsing import FormatError, split_riot_id
-from utils.riot import RiotError
-from utils.roles import TAKEN, sync_unregistered_role
+from utils.roles import sync_unregistered_role
 
 log = logging.getLogger("mainbot.register")
 
@@ -62,92 +62,45 @@ class RiotRegister(commands.Cog, name="RiotRegister"):
 
         await interaction.response.defer()
 
-        # 다른 사람이 이미 쓰고 있는 계정인지
-        owner = await self.bot.db.riot_owner(game_name, tag_line)
-        if owner is not None and owner != 유저.id:
-            await interaction.followup.send(
-                f"❌ `{game_name}#{tag_line}` 계정은 이미 <@{owner}> 님이 등록했습니다.\n"
-                "잘못된 등록이라면 관리자에게 `/등록해제` 를 요청해 주세요.",
-                ephemeral=True,
-            )
+        result = await register_riot_account(
+            self.bot, 유저, game_name, tag_line, actor=actor, source="`/등록` 명령어"
+        )
+        if not result.ok:
+            await interaction.followup.send(f"❌ {result.error}", ephemeral=True)
             return
 
-        # 라이엇 API 로 실제 존재하는 계정인지 확인
-        verified = False
-        puuid: str | None = None
-        rank_label: str | None = None
         note = ""
-
-        if self.bot.riot.enabled:
-            try:
-                account = await self.bot.riot.fetch_account(game_name, tag_line)
-            except RiotError as exc:
-                await interaction.followup.send(f"❌ {exc}", ephemeral=True)
-                return
-            if account is None:
-                await interaction.followup.send(
-                    f"❌ `{game_name}#{tag_line}` 계정을 찾을 수 없습니다.\n"
-                    "닉네임과 태그를 다시 확인해 주세요. (대소문자는 상관없습니다)",
-                    ephemeral=True,
-                )
-                return
-            # 라이엇이 알려준 정확한 표기로 저장한다
-            game_name, tag_line = account.game_name, account.tag_line
-            puuid = account.puuid
-            verified = True
-
-            rank = await self.bot.riot.fetch_solo_rank(puuid)
-            rank_label = rank.label if rank else "언랭크 / 배치 미완료"
-        else:
+        if not result.verified:
             note = (
                 "\n\n⚠️ 라이엇 API 키가 설정되어 있지 않아 **실제 계정 확인 없이** "
                 "등록했습니다. (`.env` 의 `RIOT_API_KEY`)"
             )
 
-        previous = await self.bot.db.get_user(유저.id)
-        await self.bot.db.set_riot_account(유저.id, game_name, tag_line, puuid, actor.id)
-        removed = await sync_unregistered_role(유저, True, reason="롤 계정 등록 완료")
-
         embed = base_embed(
             "✅ 롤 계정 등록 완료",
             Colors.SUCCESS,
             description=(
-                f"{유저.mention} 님의 롤 계정이 **`{game_name}#{tag_line}`** 로 "
+                f"{유저.mention} 님의 롤 계정이 **`{result.riot_id}`** 로 "
                 f"등록되었습니다.{note}"
             ),
         )
         embed.set_thumbnail(url=유저.display_avatar.url)
         embed.add_field(
-            name="계정 확인", value="라이엇 API 확인 완료" if verified else "확인 안 함", inline=True
+            name="계정 확인",
+            value="라이엇 API 확인 완료" if result.verified else "확인 안 함",
+            inline=True,
         )
-        if rank_label:
-            embed.add_field(name="솔로랭크", value=rank_label, inline=True)
-        if previous.riot_id and previous.riot_id != f"{game_name}#{tag_line}":
-            embed.add_field(name="이전 등록", value=f"`{previous.riot_id}`", inline=True)
-        if removed == TAKEN:
+        if result.rank_label:
+            embed.add_field(name="솔로랭크", value=result.rank_label, inline=True)
+        if result.previous_riot_id and not result.unchanged:
             embed.add_field(
-                name="역할",
-                value="미등록 역할이 회수되었습니다.",
-                inline=False,
+                name="이전 등록", value=f"`{result.previous_riot_id}`", inline=True
+            )
+        if result.role_removed:
+            embed.add_field(
+                name="역할", value="미등록 역할이 회수되었습니다.", inline=False
             )
         await interaction.followup.send(embed=embed)
-
-        log_embed = base_embed("🎮 롤 계정 등록", Colors.TEAL)
-        log_embed.set_author(name=str(유저), icon_url=유저.display_avatar.url)
-        log_embed.add_field(name="대상", value=user_field(유저), inline=True)
-        log_embed.add_field(name="등록한 사람", value=user_field(actor), inline=True)
-        log_embed.add_field(name="롤 계정", value=f"`{game_name}#{tag_line}`", inline=False)
-        log_embed.add_field(
-            name="이전 등록", value=f"`{previous.riot_id}`" if previous.riot_id else "없음", inline=True
-        )
-        log_embed.add_field(
-            name="API 확인", value="완료" if verified else "미확인", inline=True
-        )
-        if rank_label:
-            log_embed.add_field(name="솔로랭크", value=rank_label, inline=True)
-        if puuid:
-            log_embed.add_field(name="PUUID", value=f"`{truncate(puuid, 90)}`", inline=False)
-        await send_log(self.bot, Channels.REGISTER_LOG, log_embed)
 
     @app_commands.command(name="등록해제", description="[관리자] 유저의 롤 계정 등록을 해제합니다.")
     @app_commands.describe(유저="등록을 해제할 대상", 사유="해제 사유")

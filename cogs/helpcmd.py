@@ -11,11 +11,11 @@ from core.checks import can_moderate, is_staff
 GENERAL_SECTIONS: list[tuple[str, str]] = [
     (
         "📝 서버 등록",
-        f"`/양식안내` 닉네임 등록 양식을 봅니다\n"
-        f"`/등록 [유저] [롤닉네임#태그]` 롤 계정을 등록합니다 (본인만 가능)\n"
-        f"`/내계정` 등록된 내 롤 계정을 확인합니다\n"
-        f"→ <#{Channels.ONBOARDING}> 에 양식대로 채팅하고 `/등록` 까지 마치면 "
-        f"<@&{Roles.UNREGISTERED}> 역할이 사라집니다.",
+        f"<#{Channels.ONBOARDING}> 에 양식대로 소개를 한 번만 적으면\n"
+        f"닉네임 변경 · 티어/라인 역할 · **롤 계정 등록**까지 자동으로 끝나고 "
+        f"<@&{Roles.UNREGISTERED}> 역할이 사라집니다.\n"
+        f"`/양식안내` 양식 확인 · `/내계정` 등록된 계정 확인\n"
+        f"`/등록 [유저] [롤닉네임#태그]` 계정만 따로 바꾸고 싶을 때",
     ),
     (
         "💰 포인트",

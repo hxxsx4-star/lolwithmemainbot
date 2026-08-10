@@ -1,8 +1,14 @@
 """신규 인원 등록 안내.
 
-`1536033191381569556` 채널에 `롤닉네임#태그/티어/주라인 부라인` 양식으로 채팅을 치면
-서버 닉네임을 바꿔 주고 티어·주라인·부라인 역할을 지급한다.
-닉네임 양식과 `/등록` 이 모두 끝나면 미등록 역할을 회수한다.
+소개 채널에 `롤닉네임#태그/티어/주라인 부라인` 양식으로 채팅을 치면 한 번에
+
+  1. 서버 닉네임을 양식대로 바꾸고
+  2. 티어 · 주라인 · 부라인 역할을 지급하고
+  3. 적어 낸 롤닉#태그로 롤 계정 등록까지 마친 뒤
+  4. 미등록 역할을 회수한다.
+
+따로 `/등록` 을 칠 필요가 없다. 등록만 실패하면(계정 없음 · 중복 등) 닉네임과
+역할은 그대로 두고 미등록 역할을 남긴 채 사유를 알려 준다.
 """
 from __future__ import annotations
 
@@ -15,6 +21,7 @@ from discord.ext import commands
 
 from config import Channels, Colors, GUILD_ID, Roles
 from core.checks import staff_only
+from core.registration import register_riot_account
 from utils.logs import base_embed, truncate
 from utils.parsing import FormatError, parse_profile_format
 from utils import roles
@@ -43,6 +50,8 @@ class Onboarding(commands.Cog, name="Onboarding"):
     def __init__(self, bot: commands.Bot) -> None:
         self.bot = bot
         self._startup_done = False
+        # 같은 사람이 연달아 올린 소개가 겹쳐 처리되는 것을 막는다
+        self._processing: set[int] = set()
 
     # ------------------------------------------------- 시작할 때 자동 동기화
 
@@ -137,6 +146,9 @@ class Onboarding(commands.Cog, name="Onboarding"):
         if not isinstance(message.author, discord.Member):
             return
 
+        if message.author.id in self._processing:
+            return
+
         try:
             parsed = parse_profile_format(message.content)
         except FormatError as exc:
@@ -150,7 +162,14 @@ class Onboarding(commands.Cog, name="Onboarding"):
 
         member = message.author
         problems: list[str] = []
+        self._processing.add(member.id)
+        try:
+            await self._apply_intro(message, member, parsed, problems)
+        finally:
+            self._processing.discard(member.id)
 
+    async def _apply_intro(self, message, member, parsed, problems) -> None:
+        """소개 한 건을 닉네임 → 역할 → 계정 등록 순서로 처리한다."""
         # 1) 서버 닉네임을 양식 그대로 맞춘다
         nickname = parsed.raw[:32]
         if member.display_name != nickname:
@@ -170,12 +189,47 @@ class Onboarding(commands.Cog, name="Onboarding"):
         if not added and not removed and not member.guild.me.guild_permissions.manage_roles:
             problems.append("봇에게 **역할 관리 권한**이 없습니다.")
 
-        # 3) /등록 여부에 따라 미등록 역할 정리
-        user = await self.bot.db.get_user(member.id)
-        await sync_unregistered_role(member, user.registered, reason="닉네임 양식 등록")
+        # 3) 소개에 적은 롤닉#태그로 그 자리에서 등록까지 끝낸다
+        result = await register_riot_account(
+            self.bot,
+            member,
+            parsed.game_name,
+            parsed.tag_line,
+            actor=member,
+            source=f"<#{Channels.ONBOARDING}> 자동 등록",
+        )
+        if not result.ok:
+            # 등록만 실패해도 닉네임·역할은 이미 반영됐으니 그 사실을 함께 알린다
+            await sync_unregistered_role(member, False, reason="닉네임 양식 등록")
+            embed = base_embed(
+                "⚠️ 닉네임과 역할만 반영되었습니다",
+                Colors.DANGER,
+                description=(
+                    f"{member.mention} 님, 롤 계정 등록에 실패해서 "
+                    "미등록 역할이 아직 남아 있습니다."
+                ),
+            )
+            embed.add_field(name="닉네임", value=f"`{nickname}`", inline=False)
+            embed.add_field(name="실패 사유", value=truncate(result.error), inline=False)
+            embed.add_field(
+                name="어떻게 하나요?",
+                value=(
+                    "롤 닉네임과 태그를 확인한 뒤 다시 적어 주세요.\n"
+                    "계속 안 되면 관리자에게 문의해 주세요."
+                ),
+                inline=False,
+            )
+            if problems:
+                embed.add_field(
+                    name="그 밖에 처리하지 못한 항목",
+                    value=truncate("\n".join(problems)),
+                    inline=False,
+                )
+            await self._reply_temp(message, embed, seconds=120)
+            return
 
         embed = base_embed(
-            "✅ 등록 정보가 반영되었습니다",
+            "✅ 등록이 모두 끝났습니다",
             Colors.SUCCESS,
             description=f"{member.mention} 님, 환영합니다!",
         )
@@ -185,21 +239,16 @@ class Onboarding(commands.Cog, name="Onboarding"):
         embed.add_field(name="주 라인", value=lane_label(parsed.main_lane), inline=True)
         embed.add_field(name="부 라인", value=lane_label(parsed.sub_lane), inline=True)
 
-        if user.registered:
-            embed.add_field(
-                name="롤 계정",
-                value=f"`{user.riot_id}` 등록 완료 — 미등록 역할이 회수되었습니다.",
-                inline=False,
-            )
+        account_lines = [f"`{result.riot_id}` 등록 완료"]
+        if result.verified:
+            account_lines.append("라이엇 API 확인 완료")
         else:
-            embed.add_field(
-                name="⚠️ 아직 한 단계 남았습니다",
-                value=(
-                    "`/등록` 까지 마쳐야 미등록 역할이 사라집니다.\n"
-                    f"→ `/등록 유저:@{member.name} 롤닉네임:{parsed.riot_id}`"
-                ),
-                inline=False,
-            )
+            account_lines.append("⚠️ 라이엇 API 키가 없어 계정 확인은 생략했습니다")
+        if result.rank_label:
+            account_lines.append(f"솔로랭크 · {result.rank_label}")
+        if result.role_removed:
+            account_lines.append("미등록 역할이 회수되었습니다")
+        embed.add_field(name="롤 계정", value="\n".join(account_lines), inline=False)
 
         if problems:
             embed.add_field(name="처리하지 못한 항목", value=truncate("\n".join(problems)), inline=False)
@@ -209,16 +258,24 @@ class Onboarding(commands.Cog, name="Onboarding"):
     async def _reply_temp(
         self, message: discord.Message, embed: discord.Embed, *, seconds: int
     ) -> None:
-        """안내 메시지를 보내고 일정 시간 뒤 지운다 (채널을 깔끔하게 유지)."""
+        """안내 메시지를 보내고 일정 시간 뒤 지운다 (채널을 깔끔하게 유지).
+
+        삭제는 백그라운드로 미룬다. 여기서 기다려 버리면 처리 중 표시가 그만큼
+        오래 걸려 있어서, 실패 안내를 보고 곧바로 다시 적은 소개가 무시된다.
+        """
         try:
             reply = await message.reply(embed=embed, mention_author=False)
         except discord.HTTPException:
             return
-        await asyncio.sleep(seconds)
-        try:
-            await reply.delete()
-        except discord.HTTPException:
-            pass
+
+        async def delete_later() -> None:
+            await asyncio.sleep(seconds)
+            try:
+                await reply.delete()
+            except discord.HTTPException:
+                pass
+
+        self.bot.loop.create_task(delete_later())
 
     # --------------------------------------------------- 입장/닉네임 변경 대응
 
@@ -306,8 +363,11 @@ class Onboarding(commands.Cog, name="Onboarding"):
             ),
         )
         embed.add_field(
-            name="마지막 단계",
-            value="닉네임을 맞춘 뒤 `/등록` 까지 하면 미등록 역할이 사라집니다.",
+            name="이것만 치면 끝",
+            value=(
+                "닉네임 변경 · 티어/라인 역할 · **롤 계정 등록**까지 한 번에 처리됩니다.\n"
+                "따로 `/등록` 을 칠 필요가 없습니다."
+            ),
             inline=False,
         )
         await interaction.response.send_message(embed=embed, ephemeral=True)
