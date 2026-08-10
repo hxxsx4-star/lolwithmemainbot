@@ -44,9 +44,13 @@ log = logging.getLogger("mainbot.card")
 
 WIDTH, HEIGHT = 1200, 712
 
-# 세로 리듬 — 바깥 여백과 블록 사이 간격을 모두 같은 값으로 맞춘다.
-# 이 값 하나로 카드 전체의 숨 쉬는 간격이 정해진다.
-GAP = 28
+# 세로 리듬
+# 레벨 패널 안쪽 여백은 GAP, 카드 가장자리와 블록 사이는 그보다 넉넉하게 준다.
+# 머리말이 답답해 보이지 않도록 위아래 여백을 크게 잡고, 그만큼 티어 박스를 줄였다.
+GAP = 28          # 레벨 패널 안쪽 여백
+EDGE = 40         # 카드 위/아래 가장자리 여백
+BLOCK_GAP = 34    # 머리말 · 레벨 패널 · 티어 박스 사이 간격
+HEADER_HEIGHT = 106  # 아바타와 이름이 차지하는 높이
 
 # 레벨 한 줄의 높이: 라벨(34) + 여백(10) + 게이지(16) + 여백(8) + XP 글자(22)
 LEVEL_ROW_HEIGHT = 90
@@ -457,7 +461,7 @@ def _tier_box(
     box = _rounded((w, h), 18, BOX_FILL, outline=(*GOLD, 200), width=2)
     canvas.alpha_composite(box, (x, y))
 
-    emblem_size = 112
+    emblem_size = 104
     emblem = _tier_emblem(tier_code, emblem_size)
     canvas.alpha_composite(emblem, (x + 40, y + (h - emblem_size) // 2))
 
@@ -465,17 +469,17 @@ def _tier_box(
     max_w = x + w - 28 - text_x
 
     # 글자 블록의 중심이 박스 중심과 맞도록 잡은 값들
-    draw.text((text_x, y + 64), label, font=_font(19, bold=False), fill=MUTED)
+    draw.text((text_x, y + 46), label, font=_font(19, bold=False), fill=MUTED)
     name_font = _font(34)
     draw.text(
-        (text_x, y + 90),
+        (text_x, y + 72),
         _fit(draw, tier_name, name_font, max_w),
         font=name_font,
         fill=CREAM,
     )
     record_font = _font(18, bold=False)
     draw.text(
-        (text_x, y + 144),
+        (text_x, y + 126),
         _fit(draw, record, record_font, max_w),
         font=record_font,
         fill=MUTED_WARM,
@@ -522,17 +526,17 @@ def render_profile_card(
 
     # ------------------------------------------------------------ 머리말
     avatar_d = 92
-    canvas.alpha_composite(_circle_avatar(avatar_bytes, avatar_d), (46, 30))
+    canvas.alpha_composite(_circle_avatar(avatar_bytes, avatar_d), (46, EDGE))
 
     text_x = 156
     points_box_x = 968
     name_max_w = points_box_x - text_x - 28
 
-    draw.text((text_x, 26), PROFILE_SLOGAN, font=_font(20), fill=MUTED_WARM)
+    draw.text((text_x, EDGE - 6), PROFILE_SLOGAN, font=_font(20), fill=MUTED_WARM)
 
     name_font = _font(44)
     draw.text(
-        (text_x - 2, 48),
+        (text_x - 2, EDGE + 18),
         _fit(draw, display_name, name_font, name_max_w),
         font=name_font,
         fill=CREAM,
@@ -543,7 +547,7 @@ def render_profile_card(
     if riot_id:
         riot_font = _font(18)
         draw.text(
-            (text_x, 108),
+            (text_x, EDGE + 82),
             _fit(draw, riot_id, riot_font, name_max_w),
             font=riot_font,
             fill=GOLD_BRIGHT,
@@ -552,7 +556,7 @@ def render_profile_card(
         sub_font = _font(15, bold=False)
         _tracked_text(
             draw,
-            (text_x, 110),
+            (text_x, EDGE + 84),
             _fit(draw, PROFILE_SUBTITLE, sub_font, name_max_w),
             sub_font,
             MUTED,
@@ -561,24 +565,26 @@ def render_profile_card(
 
     # ------------------------------------------------------- 보유 포인트
     pb_w, pb_h = 188, 70
+    pb_y = EDGE + (avatar_d + 8 - pb_h) // 2  # 아바타 중심에 맞춘다
     canvas.alpha_composite(
         _rounded((pb_w, pb_h), 14, BOX_FILL, outline=(*GOLD, 215), width=2),
-        (points_box_x, 26),
+        (points_box_x, pb_y),
     )
     draw.text(
-        (points_box_x + pb_w - 20, 38), "보유 포인트",
+        (points_box_x + pb_w - 20, pb_y + 12), "보유 포인트",
         font=_font(17, bold=False), fill=MUTED, anchor="ra",
     )
     points_text = f"{points:,} P"
     draw.text(
-        (points_box_x + pb_w - 20, 58), points_text,
+        (points_box_x + pb_w - 20, pb_y + 32), points_text,
         font=_shrink_to_fit(draw, points_text, pb_w - 40, 30, 17),
         fill=CREAM, anchor="ra",
     )
 
     # --------------------------------------------------------- 레벨 패널
     # 위 여백 · 줄 사이 · 아래 여백을 모두 GAP 으로 맞춰 한쪽만 비어 보이지 않게 한다
-    panel_x, panel_y = 44, 160
+    panel_x = 44
+    panel_y = EDGE + HEADER_HEIGHT + BLOCK_GAP
     panel_w = WIDTH - panel_x * 2
     panel_h = GAP * 3 + LEVEL_ROW_HEIGHT * 2
     canvas.alpha_composite(
@@ -605,8 +611,8 @@ def render_profile_card(
     )
 
     # --------------------------------------------------------- 티어 박스
-    box_y = panel_y + panel_h + GAP
-    box_h = HEIGHT - GAP - box_y  # 카드 아래 여백도 GAP 으로 떨어지게
+    box_y = panel_y + panel_h + BLOCK_GAP
+    box_h = HEIGHT - EDGE - box_y  # 남은 높이를 그대로 쓴다 (아래 여백은 EDGE)
     box_w = (WIDTH - 44 * 2 - 16) // 2
     _tier_box(
         canvas, draw, x=44, y=box_y, w=box_w, h=box_h,
