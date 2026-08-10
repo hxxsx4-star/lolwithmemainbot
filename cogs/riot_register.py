@@ -17,7 +17,7 @@ from core.checks import is_staff
 from core.registration import register_riot_account
 from utils.logs import base_embed, send_log, truncate, user_field
 from utils.parsing import FormatError, split_riot_id
-from utils.roles import sync_unregistered_role
+from utils.roles import sync_registration_roles
 
 log = logging.getLogger("mainbot.register")
 
@@ -125,7 +125,7 @@ class RiotRegister(commands.Cog, name="RiotRegister"):
             return
 
         await self.bot.db.clear_riot_account(유저.id)
-        await sync_unregistered_role(유저, False, reason="롤 계정 등록 해제")
+        await sync_registration_roles(유저, False, reason="롤 계정 등록 해제")
 
         embed = base_embed(
             "🗑️ 롤 계정 등록 해제",

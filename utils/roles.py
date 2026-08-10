@@ -178,41 +178,58 @@ def role_problem(guild: discord.Guild, role_id: int) -> Optional[str]:
     return None
 
 
-# sync_unregistered_role 의 결과
-GIVEN = "given"          # 역할을 새로 지급함
-TAKEN = "taken"          # 역할을 회수함
-UNCHANGED = "unchanged"  # 이미 올바른 상태여서 건드리지 않음
-FAILED = "failed"        # 권한 등의 이유로 바꾸지 못함
+# sync_registration_roles 의 결과
+SET_UNREGISTERED = "unregistered"  # 미등록 역할을 붙이고 서버원 역할을 뗌
+SET_REGISTERED = "registered"      # 서버원 역할을 붙이고 미등록 역할을 뗌
+UNCHANGED = "unchanged"            # 이미 올바른 상태여서 건드리지 않음
+FAILED = "failed"                  # 권한 등의 이유로 바꾸지 못함
 
 
-async def sync_unregistered_role(
-    member: discord.Member, registered: bool, *, reason: str = "미등록 역할 동기화"
+async def sync_registration_roles(
+    member: discord.Member, registered: bool, *, reason: str = "등록 상태 동기화"
 ) -> str:
-    """미등록 역할을 붙이거나 뗀다.
+    """등록 여부에 맞춰 **미등록 역할과 서버원 역할을 맞바꾼다.**
 
-    반환값은 GIVEN / TAKEN / UNCHANGED / FAILED 중 하나다.
+    등록을 마쳤으면 미등록 역할을 떼고 서버원 역할을 주고, 아직이면 그 반대다.
+    둘은 항상 하나만 붙어 있어야 한다.
+
+    반환값은 SET_UNREGISTERED / SET_REGISTERED / UNCHANGED / FAILED 중 하나.
     '바꿀 필요가 없었다'와 '바꾸려다 실패했다'를 구분해야 집계가 정확해진다.
     """
     if member.bot:
         return UNCHANGED
-    role = member.guild.get_role(Roles.UNREGISTERED)
-    if role is None:
-        log.warning("미등록 역할(%s)을 찾을 수 없습니다.", Roles.UNREGISTERED)
+
+    guild = member.guild
+    unregistered = guild.get_role(Roles.UNREGISTERED)
+    membership = guild.get_role(Roles.MEMBER)
+    if unregistered is None and membership is None:
+        log.warning(
+            "미등록 역할(%s)과 서버원 역할(%s)을 모두 찾을 수 없습니다.",
+            Roles.UNREGISTERED,
+            Roles.MEMBER,
+        )
         return FAILED
 
-    has = role in member.roles
-    should = needs_unregistered_role(member, registered)
-    if should == has:
+    done = not needs_unregistered_role(member, registered)
+    wanted = membership if done else unregistered
+    unwanted = unregistered if done else membership
+
+    owned = set(member.roles)
+    to_add = [wanted] if wanted is not None and wanted not in owned else []
+    to_remove = [unwanted] if unwanted is not None and unwanted in owned else []
+    if not to_add and not to_remove:
         return UNCHANGED
 
     try:
-        if should:
-            await member.add_roles(role, reason=reason)
-            return GIVEN
-        await member.remove_roles(role, reason=reason)
-        return TAKEN
+        if to_add:
+            await member.add_roles(*to_add, reason=reason)
+        if to_remove:
+            await member.remove_roles(*to_remove, reason=reason)
     except discord.Forbidden:
-        log.warning("[%s] 미등록 역할을 변경할 권한이 없습니다.", member)
+        log.warning("[%s] 등록 상태 역할을 변경할 권한이 없습니다.", member)
+        return FAILED
     except discord.HTTPException as exc:
-        log.warning("[%s] 미등록 역할 변경 실패: %s", member, exc)
-    return FAILED
+        log.warning("[%s] 등록 상태 역할 변경 실패: %s", member, exc)
+        return FAILED
+
+    return SET_REGISTERED if done else SET_UNREGISTERED

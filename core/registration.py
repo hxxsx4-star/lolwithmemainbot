@@ -14,7 +14,7 @@ import discord
 from config import Channels, Colors
 from utils.logs import base_embed, send_log, truncate, user_field
 from utils.riot import RiotError
-from utils.roles import TAKEN, sync_unregistered_role
+from utils.roles import SET_REGISTERED, sync_registration_roles
 
 log = logging.getLogger("mainbot.registration")
 
@@ -98,7 +98,7 @@ async def register_riot_account(
     await bot.db.set_riot_account(member.id, game_name, tag_line, puuid, actor.id)
 
     # 4) 미등록 역할 정리
-    removed = await sync_unregistered_role(member, True, reason="롤 계정 등록 완료")
+    swapped = await sync_registration_roles(member, True, reason="롤 계정 등록 완료")
 
     result = RegisterResult(
         ok=True,
@@ -108,7 +108,7 @@ async def register_riot_account(
         verified=verified,
         rank_label=rank_label,
         previous_riot_id=previous.riot_id,
-        role_removed=removed == TAKEN,
+        role_removed=swapped == SET_REGISTERED,
         unchanged=unchanged,
     )
 
