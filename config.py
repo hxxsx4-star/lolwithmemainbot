@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import os
+from dataclasses import dataclass
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
@@ -193,6 +194,84 @@ class Level:
     CHAT_XP_PER_MESSAGE = 10
     CHAT_COOLDOWN_SECONDS = 60
     CHAT_MIN_LENGTH = 2
+
+
+class Shop:
+    """상점 수치."""
+
+    DURATION_DAYS = 30        # 구매 아이템 유지 기간
+    THEME_PRICE = 2_000       # 프로필 카드 테마
+    SLOGAN_PRICE = 3_000      # 프로필 카드 문구
+    COLOR_ROLE_PRICE = 2_000  # 색상 역할
+    SLOGAN_MAX_LENGTH = 14    # 카드 좌상단에 들어가는 길이 한계
+
+
+@dataclass(frozen=True, slots=True)
+class ThemeSpec:
+    """프로필 카드 테마 한 벌.
+
+    강조색은 테두리 · 박스 외곽선 · 음성 게이지에, 보조색은 채팅 게이지에 쓴다.
+    색상 역할을 만들 때도 `accent` 를 그대로 역할 색으로 쓴다.
+    """
+
+    name: str
+    accent: tuple[int, int, int]
+    accent_bright: tuple[int, int, int]
+    accent_dim: tuple[int, int, int]
+    bar: tuple[int, int, int]
+    bar_bright: tuple[int, int, int]
+
+
+# 기본 테마. 아무것도 사지 않은 사람에게 쓰인다.
+DEFAULT_THEME = "gold"
+
+CARD_THEMES: dict[str, ThemeSpec] = {
+    "gold": ThemeSpec(
+        "골드", (212, 179, 106), (240, 217, 140), (146, 116, 60),
+        (110, 175, 235), (150, 205, 250),
+    ),
+    "violet": ThemeSpec(
+        "바이올렛", (168, 120, 214), (206, 170, 240), (96, 64, 132),
+        (150, 120, 220), (190, 165, 245),
+    ),
+    "mint": ThemeSpec(
+        "민트", (72, 196, 168), (140, 232, 208), (34, 104, 90),
+        (70, 190, 200), (130, 225, 232),
+    ),
+    "crimson": ThemeSpec(
+        "크림슨", (206, 92, 96), (238, 150, 150), (118, 44, 48),
+        (214, 110, 110), (240, 165, 165),
+    ),
+    "azure": ThemeSpec(
+        "애저", (86, 156, 232), (150, 200, 250), (38, 78, 130),
+        (86, 176, 232), (150, 214, 250),
+    ),
+    "rose": ThemeSpec(
+        "로즈", (226, 126, 168), (248, 178, 206), (128, 58, 92),
+        (222, 130, 190), (246, 180, 220),
+    ),
+    "amber": ThemeSpec(
+        "앰버", (230, 150, 70), (250, 196, 130), (132, 80, 30),
+        (232, 168, 90), (250, 206, 150),
+    ),
+    "jade": ThemeSpec(
+        "제이드", (96, 190, 118), (156, 226, 174), (44, 100, 60),
+        (90, 196, 150), (150, 230, 194),
+    ),
+    "silver": ThemeSpec(
+        "실버", (188, 198, 212), (228, 234, 244), (100, 110, 124),
+        (160, 180, 208), (206, 220, 240),
+    ),
+    "abyss": ThemeSpec(
+        "심연", (110, 132, 196), (168, 186, 236), (52, 64, 108),
+        (120, 140, 210), (176, 194, 240),
+    ),
+}
+
+# 상점에서 파는 테마 (기본 테마는 팔지 않는다)
+SHOP_THEME_KEYS: tuple[str, ...] = tuple(
+    k for k in CARD_THEMES if k != DEFAULT_THEME
+)
 
 
 class Warning:

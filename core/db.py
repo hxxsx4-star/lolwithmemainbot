@@ -97,6 +97,24 @@ CREATE TABLE IF NOT EXISTS panels (
 );
 CREATE INDEX IF NOT EXISTS idx_panels_message ON panels(message_id);
 
+CREATE TABLE IF NOT EXISTS purchases (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id    INTEGER NOT NULL,
+    kind       TEXT NOT NULL,      -- 'theme' | 'slogan' | 'color_role'
+    item_key   TEXT NOT NULL,      -- 테마 키 · 색상 키 등
+    value      TEXT,               -- 문구 내용처럼 함께 저장할 값
+    price      INTEGER NOT NULL,
+    created_at TEXT NOT NULL,
+    expires_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_purchases_user ON purchases(user_id);
+CREATE INDEX IF NOT EXISTS idx_purchases_expiry ON purchases(expires_at);
+
+CREATE TABLE IF NOT EXISTS settings (
+    key   TEXT PRIMARY KEY,
+    value TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS counters (
     name  TEXT PRIMARY KEY,
     value INTEGER NOT NULL DEFAULT 0
@@ -535,6 +553,76 @@ class Database:
             "SELECT thread_id FROM scrims WHERE status = 'open'"
         )
         return [int(r["thread_id"]) for r in rows]
+
+    # --------------------------------------------------------------- 상점
+
+    async def add_purchase(
+        self,
+        user_id: int,
+        kind: str,
+        item_key: str,
+        price: int,
+        days: int,
+        value: Optional[str] = None,
+    ) -> str:
+        """구매를 기록하고 만료 시각(ISO)을 돌려준다."""
+        await self.ensure_user(user_id)
+        expires = now() + dt.timedelta(days=days)
+        await self._exec(
+            "INSERT INTO purchases"
+            "(user_id, kind, item_key, value, price, created_at, expires_at)"
+            " VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (user_id, kind, item_key, value, price, iso(), expires.isoformat(timespec="seconds")),
+        )
+        return expires.isoformat(timespec="seconds")
+
+    async def active_purchase(self, user_id: int, kind: str):
+        """아직 유효한 구매 중 가장 최근 것. 없으면 None."""
+        return await self._fetchone(
+            "SELECT * FROM purchases WHERE user_id = ? AND kind = ?"
+            " AND expires_at > ? ORDER BY id DESC LIMIT 1",
+            (user_id, kind, iso()),
+        )
+
+    async def active_purchases(self, user_id: int) -> list[aiosqlite.Row]:
+        """이 사람이 지금 쓰고 있는 아이템 전부."""
+        return await self._fetchall(
+            "SELECT * FROM purchases WHERE user_id = ? AND expires_at > ?"
+            " ORDER BY expires_at ASC",
+            (user_id, iso()),
+        )
+
+    async def active_by_kind(self, kind: str) -> list[aiosqlite.Row]:
+        """종류별로 아직 유효한 구매 전부 (역할 회수 판단에 쓴다)."""
+        return await self._fetchall(
+            "SELECT * FROM purchases WHERE kind = ? AND expires_at > ?",
+            (kind, iso()),
+        )
+
+    # ------------------------------------------------------- 설정 저장소
+
+    async def get_setting(self, key: str) -> Optional[str]:
+        row = await self._fetchone("SELECT value FROM settings WHERE key = ?", (key,))
+        return str(row["value"]) if row else None
+
+    async def set_setting(self, key: str, value: str) -> None:
+        await self._exec(
+            "INSERT INTO settings(key, value) VALUES (?, ?)"
+            " ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+            (key, value),
+        )
+
+    async def get_json_setting(self, key: str) -> Optional[dict]:
+        raw = await self.get_setting(key)
+        if not raw:
+            return None
+        try:
+            return json.loads(raw)
+        except ValueError:
+            return None
+
+    async def set_json_setting(self, key: str, value: dict) -> None:
+        await self.set_setting(key, json.dumps(value, ensure_ascii=False))
 
     # -------------------------------------------------------- 역할 선택 패널
 

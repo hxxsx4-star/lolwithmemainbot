@@ -5,7 +5,16 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 
-from config import Channels, Colors, Economy, Level, Roles, Warning as WarnConfig
+from config import (
+    Channels,
+    Colors,
+    Economy,
+    Level,
+    Roles,
+    SHOP_THEME_KEYS,
+    Shop,
+    Warning as WarnConfig,
+)
 from core.checks import can_moderate, is_staff
 
 GENERAL_SECTIONS: list[tuple[str, str]] = [
@@ -24,6 +33,16 @@ GENERAL_SECTIONS: list[tuple[str, str]] = [
         f"`/랭킹` 포인트 상위 10명\n"
         f"→ 음성 채널에 있으면 **{Economy.VOICE_INTERVAL_MINUTES}분마다 "
         f"{Economy.VOICE_REWARD}{Economy.UNIT}** 가 자동으로 쌓입니다.",
+    ),
+    (
+        "🛒 상점",
+        f"`/상점` 포인트로 살 수 있는 것들을 봅니다\n"
+        f"`/내아이템` 보유 아이템과 남은 기간 확인\n"
+        f"→ **역할상점** 닉네임 색이 바뀌는 색상 역할 "
+        f"({Shop.COLOR_ROLE_PRICE:,}{Economy.UNIT})\n"
+        f"→ **기타상점** 프로필 카드 테마 ({Shop.THEME_PRICE:,}{Economy.UNIT}) · "
+        f"문구 ({Shop.SLOGAN_PRICE:,}{Economy.UNIT})\n"
+        f"→ 모든 아이템은 **{Shop.DURATION_DAYS}일** 유지됩니다.",
     ),
     (
         "🎯 역할 선택",
@@ -105,6 +124,12 @@ ADMIN_SECTIONS: list[tuple[str, str]] = [
         "📮 문의함 관리",
         "`/문의함생성 [채널]` 문의함 버튼 패널을 올립니다\n"
         "티켓 채널의 **티켓 닫기 / 채널 삭제** 버튼으로 정리합니다.",
+    ),
+    (
+        "🛒 상점 관리",
+        f"`/색상역할생성` 역할상점에서 팔 색상 역할 {len(SHOP_THEME_KEYS)}종을 자동 생성합니다.\n"
+        f"→ 만든 뒤 **봇 역할을 그 역할들보다 위로** 올려 주세요.\n"
+        f"→ 구매 내역은 <#{Channels.POINT_LOG}> 에 기록됩니다.",
     ),
     (
         "💾 백업",

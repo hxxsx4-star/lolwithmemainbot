@@ -26,12 +26,15 @@ from __future__ import annotations
 import functools
 import io
 import logging
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional, Sequence
 
 from PIL import Image, ImageDraw, ImageFilter, ImageFont
 
 from config import (
+    CARD_THEMES,
+    DEFAULT_THEME,
     FONT_CANDIDATES,
     FONT_CANDIDATES_REGULAR,
     PROFILE_BACKGROUND,
@@ -55,17 +58,38 @@ HEADER_HEIGHT = 106  # 아바타와 이름이 차지하는 높이
 # 레벨 한 줄의 높이: 라벨(34) + 여백(10) + 게이지(16) + 여백(8) + XP 글자(22)
 LEVEL_ROW_HEIGHT = 90
 
+
+@dataclass(frozen=True, slots=True)
+class Theme:
+    """카드 강조색 한 벌. 상점에서 산 테마가 이 값으로 들어온다."""
+
+    accent: tuple[int, int, int]         # 테두리 · 박스 외곽선 · 음성 게이지
+    accent_bright: tuple[int, int, int]  # 밝은 강조 (레벨 숫자 · 게이지 끝)
+    accent_dim: tuple[int, int, int]     # 어두운 강조 (바깥 테두리 · 패널 선)
+    bar: tuple[int, int, int]            # 채팅 게이지
+    bar_bright: tuple[int, int, int]
+
+
+def theme_from_spec(spec) -> Theme:
+    """`config.ThemeSpec` 을 렌더러가 쓰는 Theme 으로."""
+    return Theme(
+        accent=spec.accent,
+        accent_bright=spec.accent_bright,
+        accent_dim=spec.accent_dim,
+        bar=spec.bar,
+        bar_bright=spec.bar_bright,
+    )
+
+
+DEFAULT_CARD_THEME = theme_from_spec(CARD_THEMES[DEFAULT_THEME])
+
 # ---------------------------------------------------------------- 팔레트
-# 배경(네이비 하늘 + 골드 프레임 + 청록/보랏빛 보석)에서 뽑아낸 색들
-GOLD = (212, 179, 106)
-GOLD_BRIGHT = (240, 217, 140)
-GOLD_DIM = (146, 116, 60)
+# 강조색(테두리 · 게이지)은 유저가 산 테마에 따라 바뀌므로 여기서 고정하지 않고
+# `Theme` 로 넘겨받는다. 아래는 테마와 무관하게 공통으로 쓰는 색들.
 CREAM = (244, 241, 232)
 MUTED = (168, 178, 200)
 MUTED_WARM = (186, 176, 158)
 NAVY = (10, 16, 38)
-BLUE = (110, 175, 235)
-BLUE_BRIGHT = (150, 205, 250)
 
 PANEL_FILL = (12, 20, 44, 198)
 BOX_FILL = (10, 16, 36, 214)
@@ -228,7 +252,7 @@ def _fallback_background(size: tuple[int, int]) -> Image.Image:
         )
     glow = Image.new("RGB", (w, h), (0, 0, 0))
     gdraw = ImageDraw.Draw(glow)
-    gdraw.ellipse((-200, -300, 620, 420), fill=(78, 60, 24))     # 좌상단 골드빛
+    gdraw.ellipse((-200, -300, 620, 420), fill=(78, 60, 24))     # 좌상단 따뜻한 빛
     gdraw.ellipse((w - 560, h - 340, w + 240, h + 260), fill=(14, 62, 70))  # 우하단 청록
     gdraw.ellipse((w // 2 - 220, -160, w // 2 + 220, 280), fill=(40, 34, 76))
     glow = glow.filter(ImageFilter.GaussianBlur(140))
@@ -415,6 +439,7 @@ def _level_row(
     rank: Optional[int],
     fill_left: tuple[int, int, int],
     fill_right: tuple[int, int, int],
+    level_color: tuple[int, int, int],
 ) -> None:
     """`음성 레벨 Lv.1 … #4위` 한 줄과 게이지."""
     title_font = _font(26)
@@ -424,7 +449,7 @@ def _level_row(
 
     draw.text((left, top), title, font=title_font, fill=CREAM)
     offset = left + draw.textlength(title, font=title_font) + 14
-    draw.text((offset, top + 4), f"Lv. {level}", font=level_font, fill=GOLD_BRIGHT)
+    draw.text((offset, top + 4), f"Lv. {level}", font=level_font, fill=level_color)
 
     if rank is not None:
         draw.text((right, top + 4), f"#{rank}위", font=rank_font, fill=CREAM, anchor="ra")
@@ -456,9 +481,10 @@ def _tier_box(
     tier_code: Optional[str],
     tier_name: str,
     record: str,
+    accent: tuple[int, int, int],
 ) -> None:
     """솔랭 / 자유랭크 티어 박스."""
-    box = _rounded((w, h), 18, BOX_FILL, outline=(*GOLD, 200), width=2)
+    box = _rounded((w, h), 18, BOX_FILL, outline=(*accent, 200), width=2)
     canvas.alpha_composite(box, (x, y))
 
     emblem_size = 104
@@ -509,18 +535,23 @@ def render_profile_card(
     flex_tier_code: Optional[str],
     flex_tier_name: str,
     flex_record: str,
+    theme: Theme = DEFAULT_CARD_THEME,
+    slogan: str = PROFILE_SLOGAN,
 ) -> io.BytesIO:
-    """프로필 카드를 그려 PNG 바이트로 돌려준다."""
+    """프로필 카드를 그려 PNG 바이트로 돌려준다.
+
+    `theme` 과 `slogan` 은 상점에서 산 사람만 기본값과 달라진다.
+    """
     canvas = _load_background()
     draw = ImageDraw.Draw(canvas)
 
     # 바깥 골드 테두리
     canvas.alpha_composite(
-        _rounded((WIDTH - 12, HEIGHT - 12), 28, None, outline=(*GOLD, 230), width=3),
+        _rounded((WIDTH - 12, HEIGHT - 12), 28, None, outline=(*theme.accent, 230), width=3),
         (6, 6),
     )
     canvas.alpha_composite(
-        _rounded((WIDTH - 22, HEIGHT - 22), 24, None, outline=(*GOLD_DIM, 150), width=1),
+        _rounded((WIDTH - 22, HEIGHT - 22), 24, None, outline=(*theme.accent_dim, 150), width=1),
         (11, 11),
     )
 
@@ -532,7 +563,7 @@ def render_profile_card(
     points_box_x = 968
     name_max_w = points_box_x - text_x - 28
 
-    draw.text((text_x, EDGE - 6), PROFILE_SLOGAN, font=_font(20), fill=MUTED_WARM)
+    draw.text((text_x, EDGE - 6), slogan, font=_font(20), fill=MUTED_WARM)
 
     name_font = _font(44)
     draw.text(
@@ -550,7 +581,7 @@ def render_profile_card(
             (text_x, EDGE + 82),
             _fit(draw, riot_id, riot_font, name_max_w),
             font=riot_font,
-            fill=GOLD_BRIGHT,
+            fill=theme.accent_bright,
         )
     else:
         sub_font = _font(15, bold=False)
@@ -567,7 +598,7 @@ def render_profile_card(
     pb_w, pb_h = 188, 70
     pb_y = EDGE + (avatar_d + 8 - pb_h) // 2  # 아바타 중심에 맞춘다
     canvas.alpha_composite(
-        _rounded((pb_w, pb_h), 14, BOX_FILL, outline=(*GOLD, 215), width=2),
+        _rounded((pb_w, pb_h), 14, BOX_FILL, outline=(*theme.accent, 215), width=2),
         (points_box_x, pb_y),
     )
     draw.text(
@@ -588,7 +619,7 @@ def render_profile_card(
     panel_w = WIDTH - panel_x * 2
     panel_h = GAP * 3 + LEVEL_ROW_HEIGHT * 2
     canvas.alpha_composite(
-        _rounded((panel_w, panel_h), 20, PANEL_FILL, outline=(*GOLD_DIM, 170), width=1),
+        _rounded((panel_w, panel_h), 20, PANEL_FILL, outline=(*theme.accent_dim, 170), width=1),
         (panel_x, panel_y),
     )
 
@@ -600,14 +631,16 @@ def render_profile_card(
         top=panel_y + GAP, left=row_left, right=row_right,
         title="음성 레벨", level=voice_level,
         current_xp=voice_current_xp, needed_xp=voice_needed_xp, rank=voice_rank,
-        fill_left=GOLD, fill_right=GOLD_BRIGHT,
+        fill_left=theme.accent, fill_right=theme.accent_bright,
+        level_color=theme.accent_bright,
     )
     _level_row(
         canvas, draw,
         top=panel_y + GAP * 2 + LEVEL_ROW_HEIGHT, left=row_left, right=row_right,
         title="채팅 레벨", level=chat_level,
         current_xp=chat_current_xp, needed_xp=chat_needed_xp, rank=chat_rank,
-        fill_left=BLUE, fill_right=BLUE_BRIGHT,
+        fill_left=theme.bar, fill_right=theme.bar_bright,
+        level_color=theme.accent_bright,
     )
 
     # --------------------------------------------------------- 티어 박스
@@ -617,12 +650,12 @@ def render_profile_card(
     _tier_box(
         canvas, draw, x=44, y=box_y, w=box_w, h=box_h,
         label="롤 솔랭 티어", tier_code=solo_tier_code,
-        tier_name=solo_tier_name, record=solo_record,
+        tier_name=solo_tier_name, record=solo_record, accent=theme.accent,
     )
     _tier_box(
         canvas, draw, x=44 + box_w + 16, y=box_y, w=box_w, h=box_h,
         label="롤 자유랭크 티어", tier_code=flex_tier_code,
-        tier_name=flex_tier_name, record=flex_record,
+        tier_name=flex_tier_name, record=flex_record, accent=theme.accent,
     )
 
     buffer = io.BytesIO()

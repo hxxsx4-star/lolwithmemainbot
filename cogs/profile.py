@@ -9,8 +9,14 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 
-from config import RANK_CACHE_SECONDS, TIER_NAMES
-from utils.card import render_profile_card
+from config import (
+    CARD_THEMES,
+    DEFAULT_THEME,
+    PROFILE_SLOGAN,
+    RANK_CACHE_SECONDS,
+    TIER_NAMES,
+)
+from utils.card import Theme, render_profile_card, theme_from_spec
 from utils.parsing import FormatError, parse_profile_format
 from utils.riot import RankEntry
 from utils.roles import tier_of
@@ -50,6 +56,16 @@ class Profile(commands.Cog, name="Profile"):
             flex.to_dict() if flex else None,
         )
         return solo, flex
+
+    async def _cosmetics(self, user_id: int) -> tuple[Theme, str]:
+        """상점에서 산 테마와 문구. 없거나 만료됐으면 기본값."""
+        theme_row = await self.bot.db.active_purchase(user_id, "theme")
+        key = str(theme_row["item_key"]) if theme_row else DEFAULT_THEME
+        spec = CARD_THEMES.get(key, CARD_THEMES[DEFAULT_THEME])
+
+        slogan_row = await self.bot.db.active_purchase(user_id, "slogan")
+        slogan = str(slogan_row["value"]) if slogan_row and slogan_row["value"] else PROFILE_SLOGAN
+        return theme_from_spec(spec), slogan
 
     def _tier_fields(
         self, entry: Optional[RankEntry], registered: bool
@@ -108,6 +124,8 @@ class Profile(commands.Cog, name="Profile"):
                 solo_name = TIER_NAMES.get(fallback, solo_name)
                 solo_record = "서버 등록 티어 기준"
 
+        theme, slogan = await self._cosmetics(target.id)
+
         try:
             avatar_bytes = await target.display_avatar.replace(
                 format="png", size=256
@@ -135,6 +153,8 @@ class Profile(commands.Cog, name="Profile"):
             flex_tier_code=flex_code,
             flex_tier_name=flex_name,
             flex_record=flex_record,
+            theme=theme,
+            slogan=slogan,
         )
 
         file = discord.File(buffer, filename=f"profile_{target.id}.png")
