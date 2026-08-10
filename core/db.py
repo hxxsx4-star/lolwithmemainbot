@@ -88,6 +88,15 @@ CREATE TABLE IF NOT EXISTS tickets (
     closed_by  INTEGER
 );
 
+CREATE TABLE IF NOT EXISTS panels (
+    key        TEXT PRIMARY KEY,   -- 예: 'main_lane'
+    guild_id   INTEGER NOT NULL,
+    channel_id INTEGER NOT NULL,
+    message_id INTEGER NOT NULL,
+    created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_panels_message ON panels(message_id);
+
 CREATE TABLE IF NOT EXISTS counters (
     name  TEXT PRIMARY KEY,
     value INTEGER NOT NULL DEFAULT 0
@@ -526,6 +535,28 @@ class Database:
             "SELECT thread_id FROM scrims WHERE status = 'open'"
         )
         return [int(r["thread_id"]) for r in rows]
+
+    # -------------------------------------------------------- 역할 선택 패널
+
+    async def set_panel(
+        self, key: str, guild_id: int, channel_id: int, message_id: int
+    ) -> None:
+        """패널 메시지를 기억해 둔다 (재시작 후에도 반응을 알아보기 위해)."""
+        await self._exec(
+            "INSERT OR REPLACE INTO panels(key, guild_id, channel_id, message_id, created_at)"
+            " VALUES (?, ?, ?, ?, ?)",
+            (key, guild_id, channel_id, message_id, iso()),
+        )
+
+    async def get_panel(self, key: str) -> Optional[aiosqlite.Row]:
+        return await self._fetchone("SELECT * FROM panels WHERE key = ?", (key,))
+
+    async def panel_key_of(self, message_id: int) -> Optional[str]:
+        """이 메시지가 역할 선택 패널이라면 그 종류를 돌려준다."""
+        row = await self._fetchone(
+            "SELECT key FROM panels WHERE message_id = ?", (message_id,)
+        )
+        return str(row["key"]) if row else None
 
     # ------------------------------------------------------------- 티켓
 

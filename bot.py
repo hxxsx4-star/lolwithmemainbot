@@ -22,6 +22,7 @@ EXTENSIONS = (
     "cogs.profile",
     "cogs.scrim",
     "cogs.onboarding",
+    "cogs.reaction_roles",
     "cogs.backup",
     "cogs.helpcmd",
 )
@@ -35,6 +36,7 @@ def build_intents() -> discord.Intents:
     intents.message_content = True  # 닉네임 양식 채팅 인식
     intents.guilds = True
     intents.voice_states = True     # 음성 포인트
+    intents.reactions = True        # 이모지 역할 선택
     return intents
 
 

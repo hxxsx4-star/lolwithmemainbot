@@ -119,6 +119,40 @@ def needs_unregistered_role(member: discord.Member, registered: bool) -> bool:
     return not (registered and matches_format(member.display_name))
 
 
+async def ensure_default_roles(
+    member: discord.Member, *, reason: str = "기본 역할 지급"
+) -> int:
+    """모두가 가져야 할 기본 역할 중 빠진 것을 채워 준다.
+
+    조건 없이 지급하는 역할이라 회수는 하지 않는다. 지급한 개수를 돌려준다.
+    """
+    if member.bot or not Roles.DEFAULT:
+        return 0
+
+    owned = {r.id for r in member.roles}
+    missing: list[discord.Role] = []
+    for role_id in Roles.DEFAULT:
+        if role_id in owned:
+            continue
+        role = member.guild.get_role(role_id)
+        if role is None:
+            log.warning("기본 역할(%s)을 찾을 수 없습니다.", role_id)
+            continue
+        missing.append(role)
+
+    if not missing:
+        return 0
+
+    try:
+        await member.add_roles(*missing, reason=reason)
+        return len(missing)
+    except discord.Forbidden:
+        log.warning("[%s] 기본 역할을 지급할 권한이 없습니다.", member)
+    except discord.HTTPException as exc:
+        log.warning("[%s] 기본 역할 지급 실패: %s", member, exc)
+    return 0
+
+
 def role_problem(guild: discord.Guild, role_id: int) -> Optional[str]:
     """이 역할을 봇이 지급할 수 있는지 미리 확인한다.
 

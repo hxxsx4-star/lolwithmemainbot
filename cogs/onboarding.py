@@ -20,6 +20,7 @@ from utils.parsing import FormatError, parse_profile_format
 from utils import roles
 from utils.roles import (
     apply_tier_and_lanes,
+    ensure_default_roles,
     lane_label,
     role_problem,
     sync_unregistered_role,
@@ -71,23 +72,28 @@ class Onboarding(commands.Cog, name="Onboarding"):
                 )
                 continue
 
-            given, taken, skipped, failed = await self._bulk_sync(
-                guild, reason="봇 시작 시 미등록 역할 자동 동기화"
+            given, taken, skipped, failed, defaults = await self._bulk_sync(
+                guild, reason="봇 시작 시 역할 자동 동기화"
             )
             log.info(
-                "[%s] 미등록 역할 자동 동기화 완료 — 지급 %d명 / 회수 %d명 /"
-                " 봇 제외 %d명 / 실패 %d명",
+                "[%s] 역할 자동 동기화 완료 — 미등록 지급 %d명 / 회수 %d명 /"
+                " 기본 역할 보충 %d명 / 봇 제외 %d명 / 실패 %d명",
                 guild.name,
                 given,
                 taken,
+                defaults,
                 skipped,
                 failed,
             )
 
     async def _bulk_sync(
         self, guild: discord.Guild, *, reason: str
-    ) -> tuple[int, int, int, int]:
-        """서버 전원의 미등록 역할을 맞춘다. (지급, 회수, 봇제외, 실패)"""
+    ) -> tuple[int, int, int, int, int]:
+        """서버 전원의 역할을 맞춘다.
+
+        기본 역할은 빠진 사람에게 채워 주고, 미등록 역할은 조건에 맞춰 붙이거나 뗀다.
+        (지급, 회수, 봇제외, 실패, 기본역할 보충)
+        """
         # 멤버 캐시가 비어 있으면 먼저 받아 온다
         if not guild.chunked:
             try:
@@ -95,12 +101,15 @@ class Onboarding(commands.Cog, name="Onboarding"):
             except (discord.ClientException, discord.HTTPException) as exc:
                 log.warning("[%s] 멤버 목록을 불러오지 못했습니다: %s", guild.name, exc)
 
-        given = taken = skipped = failed = 0
+        given = taken = skipped = failed = defaults = 0
 
         for index, member in enumerate(guild.members):
             if member.bot:
                 skipped += 1
                 continue
+
+            if await ensure_default_roles(member, reason=reason):
+                defaults += 1
 
             user = await self.bot.db.get_user(member.id)
             result = await sync_unregistered_role(member, user.registered, reason=reason)
@@ -115,7 +124,7 @@ class Onboarding(commands.Cog, name="Onboarding"):
             if index % 20 == 19:
                 await asyncio.sleep(1)
 
-        return given, taken, skipped, failed
+        return given, taken, skipped, failed, defaults
 
     # -------------------------------------------------------- 양식 채팅 처리
 
@@ -217,6 +226,7 @@ class Onboarding(commands.Cog, name="Onboarding"):
     async def on_member_join(self, member: discord.Member) -> None:
         if member.bot:
             return
+        await ensure_default_roles(member, reason="신규 입장")
         user = await self.bot.db.get_user(member.id)
         await sync_unregistered_role(member, user.registered, reason="신규 입장")
 
@@ -231,8 +241,8 @@ class Onboarding(commands.Cog, name="Onboarding"):
     # -------------------------------------------------------------- 명령어
 
     @app_commands.command(
-        name="미등록역할동기화",
-        description="[관리자] 봇을 제외한 모든 인원의 미등록 역할을 정리합니다.",
+        name="역할동기화",
+        description="[관리자] 봇을 제외한 전원에게 기본 역할을 채우고 미등록 역할을 정리합니다.",
     )
     @staff_only()
     async def sync_unregistered(self, interaction: discord.Interaction) -> None:
@@ -251,17 +261,21 @@ class Onboarding(commands.Cog, name="Onboarding"):
         await interaction.response.defer(ephemeral=True)
         role = guild.get_role(Roles.UNREGISTERED)
 
-        given, taken, skipped, failed = await self._bulk_sync(
-            guild, reason=f"미등록 역할 일괄 정리 ({interaction.user})"
+        given, taken, skipped, failed, defaults = await self._bulk_sync(
+            guild, reason=f"역할 일괄 정리 ({interaction.user})"
         )
 
         embed = base_embed(
-            "🔁 미등록 역할 동기화 완료",
+            "🔁 역할 동기화 완료",
             Colors.DANGER if failed else Colors.SUCCESS,
-            description=f"{role.mention} 역할을 기준에 맞춰 정리했습니다.",
+            description=(
+                f"{role.mention} 역할을 기준에 맞춰 정리하고, "
+                "기본 역할이 빠진 사람에게 채워 넣었습니다."
+            ),
         )
-        embed.add_field(name="새로 지급", value=f"{given}명", inline=True)
-        embed.add_field(name="회수", value=f"{taken}명", inline=True)
+        embed.add_field(name="미등록 지급", value=f"{given}명", inline=True)
+        embed.add_field(name="미등록 회수", value=f"{taken}명", inline=True)
+        embed.add_field(name="기본 역할 보충", value=f"{defaults}명", inline=True)
         embed.add_field(name="제외(봇)", value=f"{skipped}명", inline=True)
         embed.add_field(
             name="확인한 인원", value=f"{len(guild.members)}명", inline=True
