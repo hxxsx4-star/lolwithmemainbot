@@ -144,7 +144,7 @@ class ShopCog(commands.Cog, name="Shop"):
     # ----------------------------------------------------------- 색상 역할
 
     async def role_map(self, kind: str) -> dict[str, int]:
-        """상품 키 → 역할 ID. `/색상역할생성` · `/응원역할생성` 이 채운다."""
+        """상품 키 → 역할 ID. `ROLE_SETUP_COMMANDS` 의 명령어들이 채운다."""
         setting = ROLE_KINDS[kind]
         raw = await self.bot.db.get_json_setting(setting) or {}
         return {k: int(v) for k, v in raw.items()}
@@ -161,6 +161,9 @@ class ShopCog(commands.Cog, name="Shop"):
 
         같은 이름의 역할이 이미 서버에 있으면 새로 만들지 않고 그것을 쓴다.
         (수동으로 만들어 둔 팀 역할을 중복 생성하지 않기 위해서다.)
+
+        이미 등록해 둔 역할의 이름이 설정과 달라졌으면 **역할 이름을 고친다.**
+        새로 만들어 버리면 같은 상품의 역할이 두 개가 되기 때문이다.
         """
         guild = interaction.guild
         if guild is None:
@@ -175,7 +178,7 @@ class ShopCog(commands.Cog, name="Shop"):
 
         existing = await self.role_map(kind)
         by_name = {role.name: role for role in guild.roles}
-        created, reused, kept = [], [], []
+        created, reused, kept, renamed, stuck = [], [], [], [], []
 
         # 그라데이션은 서버 기능이 켜져 있을 때만 쓸 수 있다
         gradient_ok = GRADIENT_ROLE_FEATURE in guild.features
@@ -204,8 +207,22 @@ class ShopCog(commands.Cog, name="Shop"):
             label = f"{prefix}{spec.name}"  # type: ignore[attr-defined]
 
             role_id = existing.get(key)
-            if role_id and guild.get_role(role_id) is not None:
-                kept.append(spec.name)  # type: ignore[attr-defined]
+            known = guild.get_role(role_id) if role_id else None
+            if known is not None:
+                # 이미 등록된 역할. 설정에서 이름만 바뀌었으면 역할 이름도 맞춰 준다.
+                # (새로 만들면 같은 상품의 역할이 두 개가 되어 버린다)
+                if known.name != label:
+                    before = known.name
+                    try:
+                        await known.edit(
+                            name=label, reason=f"상점 역할 이름 변경 — {interaction.user}"
+                        )
+                        renamed.append(f"{before} → {label}")
+                    except discord.HTTPException:
+                        # 봇보다 높은 역할은 고칠 수 없다
+                        stuck.append(before)
+                else:
+                    kept.append(spec.name)  # type: ignore[attr-defined]
                 continue
 
             found = by_name.get(label)
@@ -257,6 +274,22 @@ class ShopCog(commands.Cog, name="Shop"):
             embed.add_field(
                 name=f"기존 역할 사용 ({len(reused)})",
                 value=join_names(reused),
+                inline=False,
+            )
+        if renamed:
+            embed.add_field(
+                name=f"이름 변경 ({len(renamed)})",
+                value=join_names(renamed),
+                inline=False,
+            )
+        if stuck:
+            embed.add_field(
+                name=f"⚠️ 이름을 못 바꾼 역할 ({len(stuck)})",
+                value=(
+                    join_names(stuck)
+                    + "\n봇 역할이 이 역할들보다 아래에 있습니다. "
+                    "봇 역할을 위로 올린 뒤 다시 실행해 주세요."
+                ),
                 inline=False,
             )
         embed.add_field(
