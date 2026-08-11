@@ -203,7 +203,33 @@ class Shop:
     THEME_PRICE = 2_000       # 프로필 카드 테마
     SLOGAN_PRICE = 3_000      # 프로필 카드 문구
     COLOR_ROLE_PRICE = 2_000  # 색상 역할
+    TEAM_ROLE_PRICE = 1_500   # LCK 응원 역할
     SLOGAN_MAX_LENGTH = 14    # 카드 좌상단에 들어가는 길이 한계
+
+
+@dataclass(frozen=True, slots=True)
+class TeamSpec:
+    """LCK 응원 역할 한 개."""
+
+    name: str                      # 역할 이름으로도 쓰인다
+    color: tuple[int, int, int]    # 팀 상징색 (대략치 — 서버에서 조정 가능)
+
+
+# LCK 팀 응원 역할.
+# 팀 이름과 색은 스폰서가 바뀌면 함께 바뀌므로, 시즌마다 여기를 손보면 된다.
+# `/응원역할생성` 은 같은 이름의 역할이 이미 있으면 새로 만들지 않고 그것을 쓴다.
+LCK_TEAMS: dict[str, TeamSpec] = {
+    "T1": TeamSpec("T1", (226, 1, 45)),
+    "GEN": TeamSpec("젠지", (170, 140, 44)),
+    "HLE": TeamSpec("한화생명e스포츠", (255, 102, 0)),
+    "DK": TeamSpec("디플러스 기아", (27, 60, 135)),
+    "KT": TeamSpec("KT 롤스터", (166, 25, 46)),
+    "DRX": TeamSpec("DRX", (43, 101, 172)),
+    "KDF": TeamSpec("광동 프릭스", (222, 89, 45)),
+    "NS": TeamSpec("농심 레드포스", (231, 56, 63)),
+    "BFX": TeamSpec("BNK 피어엑스", (0, 176, 168)),
+    "BRO": TeamSpec("OK저축은행 브리온", (240, 180, 40)),
+}
 
 
 @dataclass(frozen=True, slots=True)

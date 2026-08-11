@@ -23,6 +23,7 @@ from config import (
     Colors,
     Economy,
     GUILD_ID,
+    LCK_TEAMS,
     SHOP_THEME_KEYS,
     Shop,
 )
@@ -31,18 +32,36 @@ from utils.logs import base_embed, send_log, user_field
 
 log = logging.getLogger("mainbot.shop")
 
-# 상점이 만든 색상 역할 ID 를 담아 두는 설정 키
+# 상점이 만든 역할 ID 를 담아 두는 설정 키
 COLOR_ROLES_SETTING = "shop_color_roles"
+TEAM_ROLES_SETTING = "shop_team_roles"
 
 KIND_THEME = "theme"
 KIND_SLOGAN = "slogan"
 KIND_COLOR_ROLE = "color_role"
+KIND_TEAM_ROLE = "team_role"
 
 KIND_LABELS = {
     KIND_THEME: "프로필 테마",
     KIND_SLOGAN: "프로필 문구",
     KIND_COLOR_ROLE: "색상 역할",
+    KIND_TEAM_ROLE: "LCK 응원 역할",
 }
+
+# 역할을 파는 두 갈래. 각각 같은 갈래 안에서는 하나만 가질 수 있다.
+ROLE_KINDS = {
+    KIND_COLOR_ROLE: COLOR_ROLES_SETTING,
+    KIND_TEAM_ROLE: TEAM_ROLES_SETTING,
+}
+
+
+def item_name(key: str) -> str:
+    """상품 키를 사람이 읽을 이름으로."""
+    if key in CARD_THEMES:
+        return CARD_THEMES[key].name
+    if key in LCK_TEAMS:
+        return LCK_TEAMS[key].name
+    return key
 
 
 def fmt_points(value: int) -> str:
@@ -79,18 +98,25 @@ class ShopCog(commands.Cog, name="Shop"):
 
     # ----------------------------------------------------------- 색상 역할
 
-    async def color_role_map(self) -> dict[str, int]:
-        """테마 키 → 색상 역할 ID. `/색상역할생성` 으로 만들어진다."""
-        return {k: int(v) for k, v in (await self.bot.db.get_json_setting(
-            COLOR_ROLES_SETTING
-        ) or {}).items()}
+    async def role_map(self, kind: str) -> dict[str, int]:
+        """상품 키 → 역할 ID. `/색상역할생성` · `/응원역할생성` 이 채운다."""
+        setting = ROLE_KINDS[kind]
+        raw = await self.bot.db.get_json_setting(setting) or {}
+        return {k: int(v) for k, v in raw.items()}
 
-    @app_commands.command(
-        name="색상역할생성",
-        description="[관리자] 상점에서 팔 색상 역할을 자동으로 만듭니다.",
-    )
-    @staff_only()
-    async def create_color_roles(self, interaction: discord.Interaction) -> None:
+    async def _ensure_roles(
+        self,
+        interaction: discord.Interaction,
+        kind: str,
+        specs: dict[str, object],
+        *,
+        prefix: str = "",
+    ) -> None:
+        """상품마다 역할을 하나씩 준비한다.
+
+        같은 이름의 역할이 이미 서버에 있으면 새로 만들지 않고 그것을 쓴다.
+        (수동으로 만들어 둔 팀 역할을 중복 생성하지 않기 위해서다.)
+        """
         guild = interaction.guild
         if guild is None:
             return
@@ -102,19 +128,29 @@ class ShopCog(commands.Cog, name="Shop"):
 
         await interaction.response.defer(ephemeral=True)
 
-        existing = await self.color_role_map()
-        created, kept = [], []
-        for key in SHOP_THEME_KEYS:
-            spec = CARD_THEMES[key]
+        existing = await self.role_map(kind)
+        by_name = {role.name: role for role in guild.roles}
+        created, reused, kept = [], [], []
+
+        for key, spec in specs.items():
+            label = f"{prefix}{spec.name}"  # type: ignore[attr-defined]
+
             role_id = existing.get(key)
             if role_id and guild.get_role(role_id) is not None:
-                kept.append(spec.name)
+                kept.append(spec.name)  # type: ignore[attr-defined]
                 continue
+
+            found = by_name.get(label)
+            if found is not None:
+                existing[key] = found.id
+                reused.append(spec.name)  # type: ignore[attr-defined]
+                continue
+
             try:
                 role = await guild.create_role(
-                    name=f"🎨 {spec.name}",
-                    colour=discord.Colour.from_rgb(*spec.accent),
-                    reason=f"상점 색상 역할 생성 — {interaction.user}",
+                    name=label,
+                    colour=discord.Colour.from_rgb(*spec.color),  # type: ignore[attr-defined]
+                    reason=f"상점 역할 생성 — {interaction.user}",
                 )
             except discord.Forbidden:
                 await interaction.followup.send(
@@ -127,25 +163,48 @@ class ShopCog(commands.Cog, name="Shop"):
                 )
                 return
             existing[key] = role.id
-            created.append(spec.name)
+            created.append(spec.name)  # type: ignore[attr-defined]
 
-        await self.bot.db.set_json_setting(COLOR_ROLES_SETTING, existing)
+        await self.bot.db.set_json_setting(ROLE_KINDS[kind], existing)
 
         embed = base_embed(
-            "🎨 색상 역할 준비 완료",
+            f"✅ {KIND_LABELS[kind]} 준비 완료",
             Colors.SUCCESS,
             description=(
-                "역할상점에서 팔 색상 역할을 정리했습니다.\n"
+                "상점에서 팔 역할을 정리했습니다.\n"
                 "**봇 역할을 이 역할들보다 위로 올려 주세요.** 아니면 지급되지 않습니다."
             ),
         )
         embed.add_field(
             name=f"새로 만듦 ({len(created)})", value=", ".join(created) or "없음", inline=False
         )
+        if reused:
+            embed.add_field(
+                name=f"기존 역할 사용 ({len(reused)})",
+                value=", ".join(reused),
+                inline=False,
+            )
         embed.add_field(
-            name=f"이미 있음 ({len(kept)})", value=", ".join(kept) or "없음", inline=False
+            name=f"이미 등록됨 ({len(kept)})", value=", ".join(kept) or "없음", inline=False
         )
         await interaction.followup.send(embed=embed, ephemeral=True)
+
+    @app_commands.command(
+        name="색상역할생성",
+        description="[관리자] 역할상점에서 팔 색상 역할을 만듭니다.",
+    )
+    @staff_only()
+    async def create_color_roles(self, interaction: discord.Interaction) -> None:
+        specs = {key: CARD_THEMES[key] for key in SHOP_THEME_KEYS}
+        await self._ensure_roles(interaction, KIND_COLOR_ROLE, specs, prefix="🎨 ")
+
+    @app_commands.command(
+        name="응원역할생성",
+        description="[관리자] 역할상점에서 팔 LCK 팀 응원 역할을 만듭니다.",
+    )
+    @staff_only()
+    async def create_team_roles(self, interaction: discord.Interaction) -> None:
+        await self._ensure_roles(interaction, KIND_TEAM_ROLE, dict(LCK_TEAMS))
 
     # -------------------------------------------------------------- 구매
 
@@ -170,12 +229,15 @@ class ShopCog(commands.Cog, name="Shop"):
             )
 
         # 역할은 실제로 붙는지 먼저 확인한 뒤 포인트를 뺀다
-        if kind == KIND_COLOR_ROLE:
-            await self._apply_color_role(member, item_key)
+        if kind in ROLE_KINDS:
+            await self._apply_exclusive_role(member, kind, item_key)
 
         await self.bot.db.add_points(
             member.id, -price, f"상점 구매 — {KIND_LABELS.get(kind, kind)}"
         )
+        # 같은 갈래는 하나만 유지되므로 이전 구매는 여기서 끝낸다.
+        # (역할은 이미 갈아 끼웠고, 보유 목록에도 남으면 안 된다)
+        await self.bot.db.expire_purchases(member.id, kind)
         expires = await self.bot.db.add_purchase(
             member.id, kind, item_key, price, Shop.DURATION_DAYS, value
         )
@@ -183,15 +245,18 @@ class ShopCog(commands.Cog, name="Shop"):
         await self._log_purchase(member, kind, item_key, price, value, expires)
         return expires
 
-    async def _apply_color_role(self, member: discord.Member, key: str) -> None:
-        """색상 역할을 지급하고, 이전에 산 다른 색은 회수한다."""
-        roles = await self.color_role_map()
+    async def _apply_exclusive_role(
+        self, member: discord.Member, kind: str, key: str
+    ) -> None:
+        """역할을 지급하고, 같은 갈래에서 전에 산 역할은 회수한다."""
+        roles = await self.role_map(kind)
         role_id = roles.get(key)
         role = member.guild.get_role(role_id) if role_id else None
         if role is None:
+            command = "`/색상역할생성`" if kind == KIND_COLOR_ROLE else "`/응원역할생성`"
             raise ShopError(
-                "색상 역할이 아직 준비되지 않았습니다. "
-                "관리자에게 `/색상역할생성` 실행을 요청해 주세요."
+                f"{KIND_LABELS[kind]}이 아직 준비되지 않았습니다. "
+                f"관리자에게 {command} 실행을 요청해 주세요."
             )
         if role >= member.guild.me.top_role:
             raise ShopError(
@@ -208,9 +273,9 @@ class ShopCog(commands.Cog, name="Shop"):
         ]
         try:
             if role not in member.roles:
-                await member.add_roles(role, reason="상점 색상 역할 구매")
+                await member.add_roles(role, reason=f"상점 {KIND_LABELS[kind]} 구매")
             if others:
-                await member.remove_roles(*others, reason="상점 색상 역할 변경")
+                await member.remove_roles(*others, reason=f"상점 {KIND_LABELS[kind]} 변경")
         except discord.Forbidden as exc:
             raise ShopError("봇에게 역할을 줄 권한이 없습니다.") from exc
         except discord.HTTPException as exc:
@@ -226,7 +291,7 @@ class ShopCog(commands.Cog, name="Shop"):
         expires: str,
     ) -> None:
         label = KIND_LABELS.get(kind, kind)
-        name = CARD_THEMES[item_key].name if item_key in CARD_THEMES else item_key
+        name = item_name(item_key)
         embed = base_embed("🛒 상점 구매", Colors.GOLD)
         embed.set_author(name=str(member), icon_url=member.display_avatar.url)
         embed.add_field(name="구매자", value=user_field(member), inline=True)
@@ -248,29 +313,38 @@ class ShopCog(commands.Cog, name="Shop"):
         for guild in self.bot.guilds:
             if GUILD_ID is not None and guild.id != GUILD_ID:
                 continue
-            roles = await self.color_role_map()
-            if not roles:
-                continue
+            for kind in ROLE_KINDS:
+                removed = await self._expire_kind(guild, kind)
+                if removed:
+                    log.info(
+                        "[%s] 만료된 %s %d개를 회수했습니다.",
+                        guild.name, KIND_LABELS[kind], removed,
+                    )
 
-            active = {
-                (int(row["user_id"]), str(row["item_key"]))
-                for row in await self.bot.db.active_by_kind(KIND_COLOR_ROLE)
-            }
-            removed = 0
-            for key, role_id in roles.items():
-                role = guild.get_role(role_id)
-                if role is None:
+    async def _expire_kind(self, guild: discord.Guild, kind: str) -> int:
+        """기간이 끝난 역할을 회수하고 몇 개를 뗐는지 돌려준다."""
+        roles = await self.role_map(kind)
+        if not roles:
+            return 0
+
+        active = {
+            (int(row["user_id"]), str(row["item_key"]))
+            for row in await self.bot.db.active_by_kind(kind)
+        }
+        removed = 0
+        for key, role_id in roles.items():
+            role = guild.get_role(role_id)
+            if role is None:
+                continue
+            for member in list(role.members):
+                if (member.id, key) in active:
                     continue
-                for member in list(role.members):
-                    if (member.id, key) in active:
-                        continue
-                    try:
-                        await member.remove_roles(role, reason="상점 아이템 기간 만료")
-                        removed += 1
-                    except discord.HTTPException:
-                        pass
-            if removed:
-                log.info("[%s] 만료된 색상 역할 %d개를 회수했습니다.", guild.name, removed)
+                try:
+                    await member.remove_roles(role, reason="상점 아이템 기간 만료")
+                    removed += 1
+                except discord.HTTPException:
+                    pass
+        return removed
 
     @expire_items.before_loop
     async def before_expire_items(self) -> None:
@@ -311,7 +385,7 @@ class ShopCog(commands.Cog, name="Shop"):
         else:
             for row in rows:
                 key = str(row["item_key"])
-                name = CARD_THEMES[key].name if key in CARD_THEMES else key
+                name = item_name(key)
                 detail = f"`{row['value']}`" if row["value"] else name
                 embed.add_field(
                     name=KIND_LABELS.get(str(row["kind"]), str(row["kind"])),
@@ -419,34 +493,43 @@ class ShopView(discord.ui.View):
         self.add_item(CategorySelect(default=category))
 
         if category == "role":
-            roles = await self.cog.color_role_map()
+            colors = await self.cog.role_map(KIND_COLOR_ROLE)
+            teams = await self.cog.role_map(KIND_TEAM_ROLE)
             embed = base_embed(
                 "🎨 역할상점",
                 Colors.GOLD,
                 description=(
-                    f"닉네임 색이 바뀌는 색상 역할입니다. "
-                    f"**{fmt_points(Shop.COLOR_ROLE_PRICE)} / {Shop.DURATION_DAYS}일**\n"
-                    f"보유 포인트 **{fmt_points(balance)}**"
+                    f"보유 포인트 **{fmt_points(balance)}**\n"
+                    f"모두 **{Shop.DURATION_DAYS}일** 유지됩니다."
                 ),
             )
-            if not roles:
+            embed.add_field(
+                name=f"색상 역할 · {fmt_points(Shop.COLOR_ROLE_PRICE)}",
+                value=(
+                    " · ".join(
+                        CARD_THEMES[k].name for k in colors if k in CARD_THEMES
+                    )
+                    if colors
+                    else "아직 없습니다. 관리자가 `/색상역할생성` 을 실행하면 열립니다."
+                ),
+                inline=False,
+            )
+            embed.add_field(
+                name=f"LCK 응원 역할 · {fmt_points(Shop.TEAM_ROLE_PRICE)}",
+                value=(
+                    " · ".join(LCK_TEAMS[k].name for k in teams if k in LCK_TEAMS)
+                    if teams
+                    else "아직 없습니다. 관리자가 `/응원역할생성` 을 실행하면 열립니다."
+                ),
+                inline=False,
+            )
+            embed.set_footer(text="롤 같이 하자 · 각 갈래에서 하나씩 가질 수 있습니다")
+            if colors:
+                self.add_item(ColorRoleSelect(colors))
+            if teams:
+                self.add_item(TeamRoleSelect(teams))
+            if not colors and not teams:
                 embed.color = Colors.DANGER
-                embed.add_field(
-                    name="아직 준비되지 않았습니다",
-                    value="관리자가 `/색상역할생성` 을 실행하면 열립니다.",
-                    inline=False,
-                )
-            else:
-                embed.add_field(
-                    name="색상",
-                    value="\n".join(
-                        f"<@&{rid}> — {CARD_THEMES[k].name}"
-                        for k, rid in roles.items()
-                        if k in CARD_THEMES
-                    ),
-                    inline=False,
-                )
-                self.add_item(ColorRoleSelect(roles))
         else:
             embed = base_embed(
                 "🪪 기타상점",
@@ -540,29 +623,40 @@ class ThemeSelect(discord.ui.Select):
         await interaction.response.send_message(embed=embed, ephemeral=True)
 
 
-class ColorRoleSelect(discord.ui.Select):
-    def __init__(self, roles: dict[str, int]) -> None:
+class RoleSelect(discord.ui.Select):
+    """역할 한 개를 골라 바로 사는 선택지. 색상과 응원이 같은 흐름을 쓴다."""
+
+    def __init__(
+        self,
+        kind: str,
+        roles: dict[str, int],
+        names: dict[str, str],
+        *,
+        placeholder: str,
+        price: int,
+        row: int,
+    ) -> None:
+        self.kind = kind
+        self.price = price
         super().__init__(
-            placeholder="색상 고르기",
+            placeholder=placeholder,
             options=[
                 discord.SelectOption(
-                    label=CARD_THEMES[key].name,
+                    label=names[key],
                     value=key,
-                    description=f"{Shop.COLOR_ROLE_PRICE:,}P · {Shop.DURATION_DAYS}일",
+                    description=f"{price:,}P · {Shop.DURATION_DAYS}일",
                 )
                 for key in roles
-                if key in CARD_THEMES
+                if key in names
             ][:25],
-            row=1,
+            row=row,
         )
 
     async def callback(self, interaction: discord.Interaction) -> None:
         view: ShopView = self.view  # type: ignore[assignment]
         key = self.values[0]
         try:
-            expires = await view.cog.purchase(
-                view.member, KIND_COLOR_ROLE, key, Shop.COLOR_ROLE_PRICE
-            )
+            expires = await view.cog.purchase(view.member, self.kind, key, self.price)
         except ShopError as exc:
             await interaction.response.send_message(f"❌ {exc}", ephemeral=True)
             return
@@ -573,11 +667,35 @@ class ColorRoleSelect(discord.ui.Select):
                 "✅ 구매 완료",
                 Colors.SUCCESS,
                 description=(
-                    f"**{CARD_THEMES[key].name}** 색상 역할을 받았습니다.\n"
+                    f"**{item_name(key)}** {KIND_LABELS[self.kind]}을 받았습니다.\n"
                     f"만료 {fmt_expiry(expires)} · 남은 포인트 {fmt_points(balance)}"
                 ),
             ),
             ephemeral=True,
+        )
+
+
+class ColorRoleSelect(RoleSelect):
+    def __init__(self, roles: dict[str, int]) -> None:
+        super().__init__(
+            KIND_COLOR_ROLE,
+            roles,
+            {k: v.name for k, v in CARD_THEMES.items()},
+            placeholder="색상 고르기",
+            price=Shop.COLOR_ROLE_PRICE,
+            row=1,
+        )
+
+
+class TeamRoleSelect(RoleSelect):
+    def __init__(self, roles: dict[str, int]) -> None:
+        super().__init__(
+            KIND_TEAM_ROLE,
+            roles,
+            {k: v.name for k, v in LCK_TEAMS.items()},
+            placeholder="응원하는 LCK 팀 고르기",
+            price=Shop.TEAM_ROLE_PRICE,
+            row=2,
         )
 
 

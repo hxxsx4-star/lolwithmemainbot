@@ -576,6 +576,18 @@ class Database:
         )
         return expires.isoformat(timespec="seconds")
 
+    async def expire_purchases(self, user_id: int, kind: str) -> None:
+        """같은 종류의 기존 구매를 지금 만료시킨다.
+
+        한 갈래에서 하나만 가질 수 있는 아이템(색상·응원 역할, 테마)을 새로 사면
+        이전 것은 이미 대체됐으므로 보유 목록에도 남지 않아야 한다.
+        """
+        await self._exec(
+            "UPDATE purchases SET expires_at = ?"
+            " WHERE user_id = ? AND kind = ? AND expires_at > ?",
+            (iso(), user_id, kind, iso()),
+        )
+
     async def active_purchase(self, user_id: int, kind: str):
         """아직 유효한 구매 중 가장 최근 것. 없으면 None."""
         return await self._fetchone(
