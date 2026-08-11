@@ -203,33 +203,43 @@ class Shop:
     THEME_PRICE = 2_000       # 프로필 카드 테마
     SLOGAN_PRICE = 3_000      # 프로필 카드 문구
     COLOR_ROLE_PRICE = 2_000  # 색상 역할
-    TEAM_ROLE_PRICE = 1_500   # LCK 응원 역할
+    TEAM_ROLE_PRICE = 15_000  # LCK 응원 역할 (그라데이션이라 프리미엄)
     SLOGAN_MAX_LENGTH = 14    # 카드 좌상단에 들어가는 길이 한계
 
 
 @dataclass(frozen=True, slots=True)
 class TeamSpec:
-    """LCK 응원 역할 한 개."""
+    """LCK 응원 역할 한 개.
 
-    name: str                      # 역할 이름으로도 쓰인다
-    color: tuple[int, int, int]    # 팀 상징색 (대략치 — 서버에서 조정 가능)
+    `color` 와 `secondary` 두 색으로 **그라데이션 역할**을 만든다. 서버에
+    그라데이션 기능(`ENHANCED_ROLE_COLORS`)이 없으면 `color` 단색으로 떨어진다.
+    두 색 모두 어두운 테마에서 읽히도록 너무 어둡지 않게 잡았다.
+    """
+
+    name: str                          # 역할 이름으로도 쓰인다
+    color: tuple[int, int, int]        # 기본색 (그라데이션 시작)
+    secondary: tuple[int, int, int]    # 그라데이션 끝
 
 
 # LCK 팀 응원 역할.
 # 팀 이름과 색은 스폰서가 바뀌면 함께 바뀌므로, 시즌마다 여기를 손보면 된다.
 # `/응원역할생성` 은 같은 이름의 역할이 이미 있으면 새로 만들지 않고 그것을 쓴다.
+# (손으로 꾸며 둔 그라데이션을 덮어쓰지 않기 위해서다)
 LCK_TEAMS: dict[str, TeamSpec] = {
-    "T1": TeamSpec("T1", (226, 1, 45)),
-    "GEN": TeamSpec("젠지", (170, 140, 44)),
-    "HLE": TeamSpec("한화생명e스포츠", (255, 102, 0)),
-    "DK": TeamSpec("디플러스 기아", (27, 60, 135)),
-    "KT": TeamSpec("KT 롤스터", (166, 25, 46)),
-    "DRX": TeamSpec("DRX", (43, 101, 172)),
-    "KDF": TeamSpec("광동 프릭스", (222, 89, 45)),
-    "NS": TeamSpec("농심 레드포스", (231, 56, 63)),
-    "BFX": TeamSpec("BNK 피어엑스", (0, 176, 168)),
-    "BRO": TeamSpec("OK저축은행 브리온", (240, 180, 40)),
+    "T1": TeamSpec("T1", (226, 1, 45), (255, 122, 122)),
+    "GEN": TeamSpec("젠지", (170, 140, 44), (238, 212, 128)),
+    "HLE": TeamSpec("한화생명e스포츠", (255, 102, 0), (255, 190, 80)),
+    "DK": TeamSpec("디플러스 기아", (27, 60, 135), (96, 168, 244)),
+    "KT": TeamSpec("KT 롤스터", (166, 25, 46), (244, 108, 118)),
+    "DRX": TeamSpec("DRX", (43, 101, 172), (118, 196, 244)),
+    "KDF": TeamSpec("광동 프릭스", (222, 89, 45), (250, 176, 92)),
+    "NS": TeamSpec("농심 레드포스", (231, 56, 63), (255, 148, 138)),
+    "BFX": TeamSpec("BNK 피어엑스", (0, 176, 168), (128, 240, 226)),
+    "BRO": TeamSpec("OK저축은행 브리온", (240, 180, 40), (255, 230, 148)),
 }
+
+# 디스코드에서 그라데이션 역할을 쓸 수 있는 서버인지 판단할 기능 플래그
+GRADIENT_ROLE_FEATURE = "ENHANCED_ROLE_COLORS"
 
 
 @dataclass(frozen=True, slots=True)

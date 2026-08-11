@@ -40,7 +40,7 @@ GENERAL_SECTIONS: list[tuple[str, str]] = [
         f"`/상점` 포인트로 살 수 있는 것들을 봅니다\n"
         f"`/내아이템` 보유 아이템과 남은 기간 확인\n"
         f"→ **역할상점** 색상 역할 ({Shop.COLOR_ROLE_PRICE:,}{Economy.UNIT}) · "
-        f"LCK 응원 역할 ({Shop.TEAM_ROLE_PRICE:,}{Economy.UNIT})\n"
+        f"LCK 응원 역할 · 그라데이션 ({Shop.TEAM_ROLE_PRICE:,}{Economy.UNIT})\n"
         f"→ **기타상점** 프로필 카드 테마 ({Shop.THEME_PRICE:,}{Economy.UNIT}) · "
         f"문구 ({Shop.SLOGAN_PRICE:,}{Economy.UNIT})\n"
         f"→ 모든 아이템은 **{Shop.DURATION_DAYS}일** 유지됩니다.",
@@ -129,7 +129,7 @@ ADMIN_SECTIONS: list[tuple[str, str]] = [
     (
         "🛒 상점 관리",
         f"`/색상역할생성` 색상 역할 {len(SHOP_THEME_KEYS)}종을 만듭니다.\n"
-        f"`/응원역할생성` LCK 팀 응원 역할 {len(LCK_TEAMS)}종을 만듭니다.\n"
+        f"`/응원역할생성` LCK 팀 응원 역할 {len(LCK_TEAMS)}종을 그라데이션으로 만듭니다.\n"
         f"→ 같은 이름의 역할이 이미 있으면 새로 만들지 않고 그것을 씁니다.\n"
         f"→ 만든 뒤 **봇 역할을 그 역할들보다 위로** 올려 주세요.\n"
         f"→ 구매 내역은 <#{Channels.POINT_LOG}> 에 기록됩니다.",

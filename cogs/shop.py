@@ -22,6 +22,7 @@ from config import (
     Channels,
     Colors,
     Economy,
+    GRADIENT_ROLE_FEATURE,
     GUILD_ID,
     LCK_TEAMS,
     SHOP_THEME_KEYS,
@@ -132,6 +133,10 @@ class ShopCog(commands.Cog, name="Shop"):
         by_name = {role.name: role for role in guild.roles}
         created, reused, kept = [], [], []
 
+        # 그라데이션은 서버 기능이 켜져 있을 때만 쓸 수 있다
+        gradient_ok = GRADIENT_ROLE_FEATURE in guild.features
+        gradient_used = False
+
         for key, spec in specs.items():
             label = f"{prefix}{spec.name}"  # type: ignore[attr-defined]
 
@@ -146,11 +151,18 @@ class ShopCog(commands.Cog, name="Shop"):
                 reused.append(spec.name)  # type: ignore[attr-defined]
                 continue
 
+            second = getattr(spec, "secondary", None)
+            extra = {}
+            if gradient_ok and second is not None:
+                extra["secondary_colour"] = discord.Colour.from_rgb(*second)
+                gradient_used = True
+
             try:
                 role = await guild.create_role(
                     name=label,
                     colour=discord.Colour.from_rgb(*spec.color),  # type: ignore[attr-defined]
                     reason=f"상점 역할 생성 — {interaction.user}",
+                    **extra,
                 )
             except discord.Forbidden:
                 await interaction.followup.send(
@@ -187,6 +199,22 @@ class ShopCog(commands.Cog, name="Shop"):
         embed.add_field(
             name=f"이미 등록됨 ({len(kept)})", value=", ".join(kept) or "없음", inline=False
         )
+
+        wants_gradient = any(
+            getattr(spec, "secondary", None) is not None for spec in specs.values()
+        )
+        if wants_gradient:
+            embed.add_field(
+                name="그라데이션",
+                value=(
+                    "적용했습니다." if gradient_used
+                    else (
+                        "이 서버는 아직 그라데이션 역할을 쓸 수 없어 **단색**으로 만들었습니다.\n"
+                        "서버 부스트 조건을 채운 뒤 역할을 지우고 다시 실행하면 적용됩니다."
+                    )
+                ),
+                inline=False,
+            )
         await interaction.followup.send(embed=embed, ephemeral=True)
 
     @app_commands.command(
