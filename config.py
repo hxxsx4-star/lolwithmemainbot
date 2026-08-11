@@ -206,6 +206,10 @@ class Shop:
     TEAM_ROLE_PRICE = 15_000  # LCK 응원 역할 (그라데이션이라 프리미엄)
     SLOGAN_MAX_LENGTH = 14    # 카드 좌상단에 들어가는 길이 한계
 
+    # 챔피언 역할. 그라데이션이 붙은 20종은 따로 비싸게 판다.
+    CHAMPION_ROLE_PRICE = 4_000
+    CHAMPION_GRADIENT_PRICE = 12_000
+
 
 @dataclass(frozen=True, slots=True)
 class TeamSpec:
@@ -240,6 +244,103 @@ LCK_TEAMS: dict[str, TeamSpec] = {
 
 # 디스코드에서 그라데이션 역할을 쓸 수 있는 서버인지 판단할 기능 플래그
 GRADIENT_ROLE_FEATURE = "ENHANCED_ROLE_COLORS"
+
+
+@dataclass(frozen=True, slots=True)
+class ChampionSpec:
+    """챔피언 역할 한 개.
+
+    `secondary` 가 있으면 **그라데이션 역할**로 만들고 비싸게 판다.
+    없으면 `color` 단색이다. 그라데이션을 다른 챔피언으로 옮기고 싶으면
+    여기서 `secondary` 를 지우고 원하는 챔피언에 붙여 주면 된다.
+    (이미 만들어진 역할은 이름으로 재사용하므로, 색을 바꾸려면 서버에서
+    해당 역할을 지우고 `/챔피언역할생성` 을 다시 돌려야 한다)
+    """
+
+    name: str                                    # 역할 이름으로도 쓰인다
+    lane: str                                    # 상점에서 묶어 보여줄 라인
+    color: tuple[int, int, int]                  # 기본색 (그라데이션 시작)
+    secondary: tuple[int, int, int] | None = None  # 있으면 그라데이션 끝
+
+    @property
+    def gradient(self) -> bool:
+        return self.secondary is not None
+
+
+# 챔피언 응원 역할 60종. 라인별 12종씩 묶어 두었고, 그중 20종(라인별 4종)에
+# 그라데이션을 넣었다. 색은 모두 어두운 테마에서 읽히도록 잡았다.
+CHAMPIONS: dict[str, ChampionSpec] = {
+    # ------------------------------------------------------------------ 탑
+    "DARIUS": ChampionSpec("다리우스", "TOP", (176, 48, 48), (255, 120, 96)),
+    "RIVEN": ChampionSpec("리븐", "TOP", (110, 200, 190), (200, 250, 240)),
+    "AATROX": ChampionSpec("아트록스", "TOP", (198, 52, 52), (240, 200, 200)),
+    "TEEMO": ChampionSpec("티모", "TOP", (110, 200, 120), (230, 200, 90)),
+    "GAREN": ChampionSpec("가렌", "TOP", (86, 148, 216)),
+    "FIORA": ChampionSpec("피오라", "TOP", (196, 88, 120)),
+    "JAX": ChampionSpec("잭스", "TOP", (150, 130, 200)),
+    "NASUS": ChampionSpec("나서스", "TOP", (216, 176, 96)),
+    "ORNN": ChampionSpec("오른", "TOP", (208, 100, 56)),
+    "KENNEN": ChampionSpec("케넨", "TOP", (232, 206, 88)),
+    "IRELIA": ChampionSpec("이렐리아", "TOP", (96, 190, 200)),
+    "KSANTE": ChampionSpec("크산테", "TOP", (200, 176, 120)),
+    # --------------------------------------------------------------- 정글
+    "LEESIN": ChampionSpec("리 신", "JG", (208, 132, 64), (250, 200, 120)),
+    "MASTERYI": ChampionSpec("마스터 이", "JG", (216, 190, 100), (150, 230, 190)),
+    "VIEGO": ChampionSpec("비에고", "JG", (100, 200, 176), (170, 130, 220)),
+    "KINDRED": ChampionSpec("킨드레드", "JG", (168, 216, 200), (240, 240, 250)),
+    "WARWICK": ChampionSpec("워윅", "JG", (120, 160, 200)),
+    "JARVANIV": ChampionSpec("자르반 4세", "JG", (216, 180, 96)),
+    "GRAVES": ChampionSpec("그레이브즈", "JG", (176, 130, 96)),
+    "NIDALEE": ChampionSpec("니달리", "JG", (200, 170, 100)),
+    "XINZHAO": ChampionSpec("신 짜오", "JG", (196, 88, 88)),
+    "HECARIM": ChampionSpec("헤카림", "JG", (120, 200, 168)),
+    "ELISE": ChampionSpec("엘리스", "JG", (176, 96, 176)),
+    "RENGAR": ChampionSpec("렝가", "JG", (200, 140, 90)),
+    # ---------------------------------------------------------------- 미드
+    "YASUO": ChampionSpec("야스오", "MID", (100, 180, 230), (200, 240, 255)),
+    "ZED": ChampionSpec("제드", "MID", (200, 60, 72), (110, 120, 150)),
+    "AHRI": ChampionSpec("아리", "MID", (232, 120, 176), (255, 200, 230)),
+    "YONE": ChampionSpec("요네", "MID", (150, 130, 220), (240, 130, 140)),
+    "LEBLANC": ChampionSpec("르블랑", "MID", (176, 120, 216)),
+    "SYNDRA": ChampionSpec("신드라", "MID", (168, 120, 224)),
+    "AZIR": ChampionSpec("아지르", "MID", (230, 196, 100)),
+    "KATARINA": ChampionSpec("카타리나", "MID", (216, 72, 96)),
+    "TALON": ChampionSpec("탈론", "MID", (150, 160, 190)),
+    "ORIANNA": ChampionSpec("오리아나", "MID", (140, 190, 210)),
+    "VIKTOR": ChampionSpec("빅토르", "MID", (196, 150, 80)),
+    "AKALI": ChampionSpec("아칼리", "MID", (110, 210, 160)),
+    # ---------------------------------------------------------------- 원딜
+    "JHIN": ChampionSpec("진", "AD", (216, 96, 120), (240, 200, 160)),
+    "JINX": ChampionSpec("징크스", "AD", (216, 100, 176), (140, 200, 230)),
+    "CAITLYN": ChampionSpec("케이틀린", "AD", (130, 170, 220), (230, 190, 120)),
+    "EZREAL": ChampionSpec("이즈리얼", "AD", (230, 200, 110), (120, 200, 230)),
+    "ASHE": ChampionSpec("애쉬", "AD", (140, 200, 230)),
+    "VAYNE": ChampionSpec("베인", "AD", (170, 130, 200)),
+    "MISSFORTUNE": ChampionSpec("미스 포츈", "AD", (216, 110, 90)),
+    "XAYAH": ChampionSpec("자야", "AD", (200, 90, 130)),
+    "LUCIAN": ChampionSpec("루시안", "AD", (200, 180, 140)),
+    "KALISTA": ChampionSpec("칼리스타", "AD", (110, 200, 190)),
+    "SIVIR": ChampionSpec("시비르", "AD", (216, 170, 90)),
+    "KOGMAW": ChampionSpec("코그모", "AD", (150, 200, 110)),
+    # ---------------------------------------------------------------- 서폿
+    "THRESH": ChampionSpec("쓰레쉬", "SUP", (110, 210, 170), (180, 250, 220)),
+    "LEONA": ChampionSpec("레오나", "SUP", (230, 180, 90), (255, 230, 160)),
+    "PYKE": ChampionSpec("파이크", "SUP", (90, 200, 200), (170, 120, 210)),
+    "YUUMI": ChampionSpec("유미", "SUP", (230, 170, 200), (180, 220, 250)),
+    "LULU": ChampionSpec("룰루", "SUP", (190, 150, 230)),
+    "NAMI": ChampionSpec("나미", "SUP", (110, 190, 220)),
+    "SORAKA": ChampionSpec("소라카", "SUP", (170, 200, 230)),
+    "BLITZCRANK": ChampionSpec("블리츠크랭크", "SUP", (196, 160, 90)),
+    "BRAUM": ChampionSpec("브라움", "SUP", (150, 180, 220)),
+    "MORGANA": ChampionSpec("모르가나", "SUP", (170, 120, 210)),
+    "ALISTAR": ChampionSpec("알리스타", "SUP", (196, 130, 110)),
+    "SENNA": ChampionSpec("세나", "SUP", (140, 200, 180)),
+}
+
+
+def champions_in_lane(lane: str) -> dict[str, ChampionSpec]:
+    """해당 라인의 챔피언만 골라 준다. 상점 선택지가 25개를 넘지 않게 하는 용도."""
+    return {k: v for k, v in CHAMPIONS.items() if v.lane == lane}
 
 
 @dataclass(frozen=True, slots=True)

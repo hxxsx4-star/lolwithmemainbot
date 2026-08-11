@@ -1,8 +1,9 @@
 """포인트 상점.
 
-`/상점` 을 치면 **역할상점**과 **기타상점** 두 갈래가 나온다.
+`/상점` 을 치면 **역할상점 · 챔피언상점 · 기타상점** 세 갈래가 나온다.
 
-  · 역할상점 — 색상 역할. 닉네임 색이 바뀐다.
+  · 역할상점 — 색상 역할과 LCK 응원 역할. 닉네임 색이 바뀐다.
+  · 챔피언상점 — 챔피언 60종. 라인을 고르면 그 라인 챔피언만 보인다.
   · 기타상점 — 프로필 카드 테마와 문구.
 
 모든 아이템은 **30일 기간제**다. 영구로 팔면 두어 달 만에 다들 사고 끝나서
@@ -19,14 +20,17 @@ from discord.ext import commands, tasks
 
 from config import (
     CARD_THEMES,
+    CHAMPIONS,
     Channels,
     Colors,
     Economy,
     GRADIENT_ROLE_FEATURE,
     GUILD_ID,
+    LANE_SHORT,
     LCK_TEAMS,
     SHOP_THEME_KEYS,
     Shop,
+    champions_in_lane,
 )
 from core.checks import staff_only
 from utils.logs import base_embed, send_log, user_field
@@ -36,24 +40,40 @@ log = logging.getLogger("mainbot.shop")
 # 상점이 만든 역할 ID 를 담아 두는 설정 키
 COLOR_ROLES_SETTING = "shop_color_roles"
 TEAM_ROLES_SETTING = "shop_team_roles"
+CHAMPION_ROLES_SETTING = "shop_champion_roles"
 
 KIND_THEME = "theme"
 KIND_SLOGAN = "slogan"
 KIND_COLOR_ROLE = "color_role"
 KIND_TEAM_ROLE = "team_role"
+KIND_CHAMPION_ROLE = "champion_role"
 
 KIND_LABELS = {
     KIND_THEME: "프로필 테마",
     KIND_SLOGAN: "프로필 문구",
     KIND_COLOR_ROLE: "색상 역할",
     KIND_TEAM_ROLE: "LCK 응원 역할",
+    KIND_CHAMPION_ROLE: "챔피언 역할",
 }
 
-# 역할을 파는 두 갈래. 각각 같은 갈래 안에서는 하나만 가질 수 있다.
+# 역할을 파는 갈래들. 각각 같은 갈래 안에서는 하나만 가질 수 있다.
 ROLE_KINDS = {
     KIND_COLOR_ROLE: COLOR_ROLES_SETTING,
     KIND_TEAM_ROLE: TEAM_ROLES_SETTING,
+    KIND_CHAMPION_ROLE: CHAMPION_ROLES_SETTING,
 }
+
+# 갈래별로 역할을 준비하는 관리자 명령어 (아직 안 만들었을 때 안내에 쓴다)
+ROLE_SETUP_COMMANDS = {
+    KIND_COLOR_ROLE: "`/색상역할생성`",
+    KIND_TEAM_ROLE: "`/응원역할생성`",
+    KIND_CHAMPION_ROLE: "`/챔피언역할생성`",
+}
+
+# 서버 하나가 가질 수 있는 역할 수 한계. 60종을 한 번에 만들기 전에 확인한다.
+GUILD_ROLE_LIMIT = 250
+
+GRADIENT_MARK = "✨"
 
 
 def item_name(key: str) -> str:
@@ -62,11 +82,35 @@ def item_name(key: str) -> str:
         return CARD_THEMES[key].name
     if key in LCK_TEAMS:
         return LCK_TEAMS[key].name
+    if key in CHAMPIONS:
+        return CHAMPIONS[key].name
     return key
+
+
+def champion_price(key: str) -> int:
+    """챔피언 역할 값. 그라데이션이 붙은 20종은 따로 비싸다."""
+    spec = CHAMPIONS.get(key)
+    if spec is not None and spec.gradient:
+        return Shop.CHAMPION_GRADIENT_PRICE
+    return Shop.CHAMPION_ROLE_PRICE
 
 
 def fmt_points(value: int) -> str:
     return f"{value:,}{Economy.UNIT}"
+
+
+def join_names(names: list[str], *, limit: int = 900) -> str:
+    """임베드 필드(1024자)를 넘기지 않도록 이름 목록을 잘라 잇는다."""
+    if not names:
+        return "없음"
+    out: list[str] = []
+    used = 0
+    for name in names:
+        if used + len(name) + 2 > limit:
+            return " · ".join(out) + f" 외 {len(names) - len(out)}종"
+        out.append(name)
+        used += len(name) + 2
+    return " · ".join(out)
 
 
 def fmt_expiry(raw: str) -> str:
@@ -137,6 +181,25 @@ class ShopCog(commands.Cog, name="Shop"):
         gradient_ok = GRADIENT_ROLE_FEATURE in guild.features
         gradient_used = False
 
+        # 새로 만들어야 할 개수가 서버 역할 한계를 넘으면 아예 시작하지 않는다.
+        # (절반만 만들어 두고 실패하면 정리가 성가시다)
+        missing = sum(
+            1
+            for key, spec in specs.items()
+            if not (
+                (rid := existing.get(key)) and guild.get_role(rid) is not None
+            )
+            and f"{prefix}{spec.name}" not in by_name  # type: ignore[attr-defined]
+        )
+        if len(guild.roles) + missing > GUILD_ROLE_LIMIT:
+            await interaction.followup.send(
+                f"역할을 **{missing}개** 더 만들어야 하는데, 서버 역할이 이미 "
+                f"{len(guild.roles)}개라 한계({GUILD_ROLE_LIMIT}개)를 넘습니다.\n"
+                "쓰지 않는 역할을 먼저 정리해 주세요.",
+                ephemeral=True,
+            )
+            return
+
         for key, spec in specs.items():
             label = f"{prefix}{spec.name}"  # type: ignore[attr-defined]
 
@@ -188,33 +251,35 @@ class ShopCog(commands.Cog, name="Shop"):
             ),
         )
         embed.add_field(
-            name=f"새로 만듦 ({len(created)})", value=", ".join(created) or "없음", inline=False
+            name=f"새로 만듦 ({len(created)})", value=join_names(created), inline=False
         )
         if reused:
             embed.add_field(
                 name=f"기존 역할 사용 ({len(reused)})",
-                value=", ".join(reused),
+                value=join_names(reused),
                 inline=False,
             )
         embed.add_field(
-            name=f"이미 등록됨 ({len(kept)})", value=", ".join(kept) or "없음", inline=False
+            name=f"이미 등록됨 ({len(kept)})", value=join_names(kept), inline=False
         )
 
-        wants_gradient = any(
+        wants_gradient = sum(
             getattr(spec, "secondary", None) is not None for spec in specs.values()
         )
         if wants_gradient:
-            embed.add_field(
-                name="그라데이션",
-                value=(
-                    "적용했습니다." if gradient_used
-                    else (
-                        "이 서버는 아직 그라데이션 역할을 쓸 수 없어 **단색**으로 만들었습니다.\n"
-                        "서버 부스트 조건을 채운 뒤 역할을 지우고 다시 실행하면 적용됩니다."
-                    )
-                ),
-                inline=False,
-            )
+            if not gradient_ok:
+                note = (
+                    "이 서버는 아직 그라데이션 역할을 쓸 수 없어 **단색**으로 만들었습니다.\n"
+                    "서버 부스트 조건을 채운 뒤 역할을 지우고 다시 실행하면 적용됩니다."
+                )
+            elif gradient_used:
+                note = f"**{wants_gradient}종**에 적용했습니다."
+            else:
+                note = (
+                    f"그라데이션 대상 **{wants_gradient}종**은 이미 만들어져 있어 "
+                    "손대지 않았습니다."
+                )
+            embed.add_field(name="그라데이션", value=note, inline=False)
         await interaction.followup.send(embed=embed, ephemeral=True)
 
     @app_commands.command(
@@ -233,6 +298,15 @@ class ShopCog(commands.Cog, name="Shop"):
     @staff_only()
     async def create_team_roles(self, interaction: discord.Interaction) -> None:
         await self._ensure_roles(interaction, KIND_TEAM_ROLE, dict(LCK_TEAMS))
+
+    @app_commands.command(
+        name="챔피언역할생성",
+        description="[관리자] 챔피언상점에서 팔 챔피언 역할 60종을 만듭니다.",
+    )
+    @staff_only()
+    async def create_champion_roles(self, interaction: discord.Interaction) -> None:
+        # 60개를 한 번에 만들면 레이트 리밋에 걸려 몇 분 걸릴 수 있다.
+        await self._ensure_roles(interaction, KIND_CHAMPION_ROLE, dict(CHAMPIONS))
 
     # -------------------------------------------------------------- 구매
 
@@ -281,7 +355,7 @@ class ShopCog(commands.Cog, name="Shop"):
         role_id = roles.get(key)
         role = member.guild.get_role(role_id) if role_id else None
         if role is None:
-            command = "`/색상역할생성`" if kind == KIND_COLOR_ROLE else "`/응원역할생성`"
+            command = ROLE_SETUP_COMMANDS[kind]
             raise ShopError(
                 f"{KIND_LABELS[kind]}이 아직 준비되지 않았습니다. "
                 f"관리자에게 {command} 실행을 요청해 주세요."
@@ -437,7 +511,20 @@ def home_embed(balance: int) -> discord.Embed:
     )
     embed.add_field(
         name="🎨 역할상점",
-        value=f"닉네임 색이 바뀌는 색상 역할 · {fmt_points(Shop.COLOR_ROLE_PRICE)}",
+        value=(
+            f"색상 역할 · {fmt_points(Shop.COLOR_ROLE_PRICE)}\n"
+            f"LCK 응원 역할 (그라데이션) · {fmt_points(Shop.TEAM_ROLE_PRICE)}"
+        ),
+        inline=False,
+    )
+    embed.add_field(
+        name="⚔️ 챔피언상점",
+        value=(
+            f"챔피언 {len(CHAMPIONS)}종 · {fmt_points(Shop.CHAMPION_ROLE_PRICE)}\n"
+            f"{GRADIENT_MARK} 그라데이션 챔피언 "
+            f"{sum(c.gradient for c in CHAMPIONS.values())}종 · "
+            f"{fmt_points(Shop.CHAMPION_GRADIENT_PRICE)}"
+        ),
         inline=False,
     )
     embed.add_field(
@@ -502,6 +589,7 @@ class ShopView(discord.ui.View):
         super().__init__(timeout=180)
         self.cog = cog
         self.member = member
+        self.champion_lane: str | None = None  # 챔피언상점에서 고른 라인
         self.add_item(CategorySelect())
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
@@ -558,6 +646,8 @@ class ShopView(discord.ui.View):
                 self.add_item(TeamRoleSelect(teams))
             if not colors and not teams:
                 embed.color = Colors.DANGER
+        elif category == "champion":
+            embed = await self._champion_embed(balance)
         else:
             embed = base_embed(
                 "🪪 기타상점",
@@ -588,6 +678,70 @@ class ShopView(discord.ui.View):
 
         await interaction.response.edit_message(embed=embed, view=self)
 
+    async def _champion_embed(self, balance: int) -> discord.Embed:
+        """챔피언상점 화면. 선택지가 25개를 넘지 않도록 라인을 먼저 고르게 한다."""
+        roles = await self.cog.role_map(KIND_CHAMPION_ROLE)
+        embed = base_embed(
+            "⚔️ 챔피언상점",
+            Colors.TEAL,
+            description=(
+                f"보유 포인트 **{fmt_points(balance)}** · "
+                f"**{Shop.DURATION_DAYS}일** 유지\n"
+                f"일반 {fmt_points(Shop.CHAMPION_ROLE_PRICE)} · "
+                f"{GRADIENT_MARK} 그라데이션 "
+                f"{fmt_points(Shop.CHAMPION_GRADIENT_PRICE)}"
+            ),
+        )
+        if not roles:
+            embed.color = Colors.DANGER
+            embed.add_field(
+                name="아직 열리지 않았습니다",
+                value="관리자가 `/챔피언역할생성` 을 실행하면 열립니다.",
+                inline=False,
+            )
+            return embed
+
+        self.add_item(ChampionLaneSelect(self.champion_lane))
+
+        if self.champion_lane is None:
+            for lane, short in LANE_SHORT.items():
+                names = [
+                    f"{GRADIENT_MARK}{spec.name}" if spec.gradient else spec.name
+                    for key, spec in champions_in_lane(lane).items()
+                    if key in roles
+                ]
+                if names:
+                    embed.add_field(name=short, value=join_names(names), inline=False)
+            embed.set_footer(text="롤 같이 하자 · 라인을 고르면 살 수 있습니다")
+            return embed
+
+        available = {
+            key: spec
+            for key, spec in champions_in_lane(self.champion_lane).items()
+            if key in roles
+        }
+        if not available:
+            embed.add_field(
+                name=LANE_SHORT[self.champion_lane],
+                value="이 라인은 아직 준비된 역할이 없습니다.",
+                inline=False,
+            )
+            return embed
+
+        self.add_item(ChampionSelect(available))
+        embed.add_field(
+            name=f"{LANE_SHORT[self.champion_lane]} · {len(available)}종",
+            value=join_names(
+                [
+                    f"{GRADIENT_MARK}{spec.name}" if spec.gradient else spec.name
+                    for spec in available.values()
+                ]
+            ),
+            inline=False,
+        )
+        embed.set_footer(text="롤 같이 하자 · 챔피언 역할은 하나만 가질 수 있습니다")
+        return embed
+
 
 class CategorySelect(discord.ui.Select):
     def __init__(self, default: str | None = None) -> None:
@@ -596,8 +750,13 @@ class CategorySelect(discord.ui.Select):
             options=[
                 discord.SelectOption(
                     label="역할상점", value="role", emoji="🎨",
-                    description="닉네임 색이 바뀌는 색상 역할",
+                    description="색상 역할 · LCK 응원 역할",
                     default=default == "role",
+                ),
+                discord.SelectOption(
+                    label="챔피언상점", value="champion", emoji="⚔️",
+                    description=f"챔피언 역할 {len(CHAMPIONS)}종",
+                    default=default == "champion",
                 ),
                 discord.SelectOption(
                     label="기타상점", value="misc", emoji="🪪",
@@ -610,6 +769,30 @@ class CategorySelect(discord.ui.Select):
 
     async def callback(self, interaction: discord.Interaction) -> None:
         await self.view.show_category(interaction, self.values[0])  # type: ignore[attr-defined]
+
+
+class ChampionLaneSelect(discord.ui.Select):
+    """챔피언 60종을 한 번에 못 보여주므로 라인으로 먼저 좁힌다."""
+
+    def __init__(self, default: str | None = None) -> None:
+        super().__init__(
+            placeholder="라인 고르기",
+            options=[
+                discord.SelectOption(
+                    label=short,
+                    value=lane,
+                    description=f"{len(champions_in_lane(lane))}종",
+                    default=default == lane,
+                )
+                for lane, short in LANE_SHORT.items()
+            ],
+            row=1,
+        )
+
+    async def callback(self, interaction: discord.Interaction) -> None:
+        view: ShopView = self.view  # type: ignore[assignment]
+        view.champion_lane = self.values[0]
+        await view.show_category(interaction, "champion")
 
 
 class ThemeSelect(discord.ui.Select):
@@ -663,16 +846,20 @@ class RoleSelect(discord.ui.Select):
         placeholder: str,
         price: int,
         row: int,
+        prices: dict[str, int] | None = None,
     ) -> None:
         self.kind = kind
         self.price = price
+        self.prices = prices or {}  # 상품마다 값이 다를 때만 채운다
         super().__init__(
             placeholder=placeholder,
             options=[
                 discord.SelectOption(
                     label=names[key],
                     value=key,
-                    description=f"{price:,}P · {Shop.DURATION_DAYS}일",
+                    description=(
+                        f"{self.prices.get(key, price):,}P · {Shop.DURATION_DAYS}일"
+                    ),
                 )
                 for key in roles
                 if key in names
@@ -683,8 +870,9 @@ class RoleSelect(discord.ui.Select):
     async def callback(self, interaction: discord.Interaction) -> None:
         view: ShopView = self.view  # type: ignore[assignment]
         key = self.values[0]
+        price = self.prices.get(key, self.price)
         try:
-            expires = await view.cog.purchase(view.member, self.kind, key, self.price)
+            expires = await view.cog.purchase(view.member, self.kind, key, price)
         except ShopError as exc:
             await interaction.response.send_message(f"❌ {exc}", ephemeral=True)
             return
@@ -723,6 +911,28 @@ class TeamRoleSelect(RoleSelect):
             {k: v.name for k, v in LCK_TEAMS.items()},
             placeholder="응원하는 LCK 팀 고르기",
             price=Shop.TEAM_ROLE_PRICE,
+            row=2,
+        )
+
+
+class ChampionSelect(RoleSelect):
+    """한 라인의 챔피언만 담는다. 그라데이션 챔피언은 값이 따로 붙는다."""
+
+    def __init__(self, champions: dict[str, object]) -> None:
+        super().__init__(
+            KIND_CHAMPION_ROLE,
+            {key: 0 for key in champions},
+            {
+                key: (
+                    f"{GRADIENT_MARK} {spec.name}"  # type: ignore[attr-defined]
+                    if spec.gradient  # type: ignore[attr-defined]
+                    else spec.name  # type: ignore[attr-defined]
+                )
+                for key, spec in champions.items()
+            },
+            placeholder="챔피언 고르기",
+            price=Shop.CHAMPION_ROLE_PRICE,
+            prices={key: champion_price(key) for key in champions},
             row=2,
         )
 
