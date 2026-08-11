@@ -108,13 +108,13 @@ python bot.py
 
 | 라인 | ✨ 그라데이션 4종 | 단색 8종 |
 | --- | --- | --- |
-| 탑 | Darius · Riven · Aatrox · Teemo | Garen · Fiora · Jax · Nasus · Ornn · Kennen · Irelia · K'Sante |
-| 정글 | Lee Sin · Master Yi · Viego · Kindred | Warwick · Jarvan IV · Graves · Nidalee · Xin Zhao · Hecarim · Elise · Rengar |
-| 미드 | Yasuo · Zed · Ahri · Yone | LeBlanc · Syndra · Azir · Katarina · Talon · Orianna · Viktor · Akali |
-| 원딜 | Jhin · Jinx · Caitlyn · Ezreal | Ashe · Vayne · Miss Fortune · Xayah · Lucian · Kalista · Sivir · Kog'Maw |
-| 서폿 | Thresh · Leona · Pyke · Yuumi | Lulu · Nami · Soraka · Blitzcrank · Braum · Morgana · Alistar · Senna |
+| 탑 | 다리우스 · 리븐 · 아트록스 · 티모 | 가렌 · 피오라 · 잭스 · 나서스 · 오른 · 케넨 · 이렐리아 · 크산테 |
+| 정글 | 리 신 · 마스터 이 · 비에고 · 킨드레드 | 워윅 · 자르반 4세 · 그레이브즈 · 니달리 · 신 짜오 · 헤카림 · 엘리스 · 렝가 |
+| 미드 | 야스오 · 제드 · 아리 · 요네 | 르블랑 · 신드라 · 아지르 · 카타리나 · 탈론 · 오리아나 · 빅토르 · 아칼리 |
+| 원딜 | 진 · 징크스 · 케이틀린 · 이즈리얼 | 애쉬 · 베인 · 미스 포츈 · 자야 · 루시안 · 칼리스타 · 시비르 · 코그모 |
+| 서폿 | 쓰레쉬 · 레오나 · 파이크 · 유미 | 룰루 · 나미 · 소라카 · 블리츠크랭크 · 브라움 · 모르가나 · 알리스타 · 세나 |
 
-역할 이름은 라이엇 영문 표기를 그대로 씁니다.
+역할 이름은 라이엇 한국어 표기를 그대로 씁니다. (LCK 팀 역할만 약칭으로 영문)
 
 챔피언 목록과 색은 `config.py` 의 `CHAMPIONS` 에 있습니다. **그라데이션을 다른
 챔피언으로 옮기려면** 거기서 `secondary` 색을 지우고 원하는 챔피언에 붙이면
