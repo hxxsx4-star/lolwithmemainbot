@@ -44,6 +44,7 @@ class Channels:
     ONBOARDING = 1536033191381569556       # 닉네임 양식 입력 채널
     SCRIM_FORUM = 1536049980836548720      # 내전 포럼 채널
     ROLE_PICKER = 1536153863441223760      # 이모지로 라인 역할을 고르는 채널
+    PREDICTION = 1537005994884997200       # 프로 경기 승부예측
 
 
 class Roles:
@@ -409,6 +410,46 @@ CARD_THEMES: dict[str, ThemeSpec] = {
 SHOP_THEME_KEYS: tuple[str, ...] = tuple(
     k for k in CARD_THEMES if k != DEFAULT_THEME
 )
+
+
+class Prediction:
+    """승부예측 수치."""
+
+    LEAD_HOURS = 24            # 경기 시작 몇 시간 전에 예측을 올릴지
+    POLL_MINUTES = 15          # 일정을 다시 확인하는 주기
+    CLOSE_BEFORE_MINUTES = 0   # 경기 시작 몇 분 전에 투표를 닫을지
+    CORRECT_REWARD = 200       # 맞혔을 때 주는 포인트 (틀려도 잃지는 않는다)
+    MAX_POST_PER_TICK = 8      # 한 번에 올릴 수 있는 예측 수 (레이트 리밋 보호)
+
+
+# 승부예측 일정을 가져올 곳. lolesports.com 웹사이트가 그대로 쓰는 공개 API 다.
+# 이 키는 라이엇 웹 프론트엔드에 박혀 있는 공개 키라서 따로 발급받지 않아도 된다.
+ESPORTS_BASE_URL = "https://esports-api.lolesports.com/persisted/gw"
+ESPORTS_API_KEY = os.getenv(
+    "ESPORTS_API_KEY", "0TvQnueqKa5mxJntVWt0w4LpLfEkrV1Ta8rQBb9Z"
+)
+ESPORTS_LOCALE = os.getenv("ESPORTS_LOCALE", "ko-KR")
+
+# 자동으로 올릴 대회. slug 가 정확히 같거나 대회 이름에 들어 있으면 잡는다.
+# 실제 slug 는 서버마다 확인이 필요하므로 `/리그목록` 으로 확인하고 고치면 된다.
+# 아시안게임은 이 API 에 없으므로 `/경기추가` 로 직접 넣는다.
+ESPORTS_LEAGUES: tuple[str, ...] = (
+    "lck",
+    "msi",
+    "worlds",
+    "ewc",
+    "esports_world_cup",
+    "esports world cup",
+)
+
+# 대회 이름을 한국어로 보여줄 때 쓰는 표기 (없으면 API 이름 그대로)
+LEAGUE_NAMES: dict[str, str] = {
+    "lck": "LCK",
+    "msi": "MSI",
+    "worlds": "월드 챔피언십",
+    "ewc": "EWC",
+    "esports_world_cup": "EWC",
+}
 
 
 class Warning:

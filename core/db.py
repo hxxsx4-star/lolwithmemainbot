@@ -119,6 +119,33 @@ CREATE TABLE IF NOT EXISTS counters (
     name  TEXT PRIMARY KEY,
     value INTEGER NOT NULL DEFAULT 0
 );
+
+CREATE TABLE IF NOT EXISTS predictions (
+    match_id   TEXT PRIMARY KEY,       -- API 경기 ID 또는 manual-N
+    source     TEXT NOT NULL DEFAULT 'api',
+    league     TEXT NOT NULL,
+    block      TEXT,                   -- "3주차" 같은 라운드 이름
+    team_a     TEXT NOT NULL,
+    team_b     TEXT NOT NULL,
+    best_of    INTEGER NOT NULL DEFAULT 1,
+    start_at   TEXT NOT NULL,          -- UTC ISO
+    channel_id INTEGER,
+    message_id INTEGER,
+    state      TEXT NOT NULL DEFAULT 'open',  -- open / closed / resolved / cancelled
+    winner     TEXT,                   -- 'A' / 'B'
+    created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_predictions_state ON predictions(state);
+CREATE INDEX IF NOT EXISTS idx_predictions_message ON predictions(message_id);
+
+CREATE TABLE IF NOT EXISTS prediction_votes (
+    match_id   TEXT NOT NULL,
+    user_id    INTEGER NOT NULL,
+    pick       TEXT NOT NULL,          -- 'A' / 'B'
+    created_at TEXT NOT NULL,
+    PRIMARY KEY (match_id, user_id)
+);
+CREATE INDEX IF NOT EXISTS idx_prediction_votes_user ON prediction_votes(user_id);
 """
 
 
@@ -698,4 +725,152 @@ class Database:
             "UPDATE tickets SET status = 'closed', closed_at = ?, closed_by = ?"
             " WHERE channel_id = ?",
             (iso(), closed_by, channel_id),
+        )
+
+    # --------------------------------------------------------- 승부예측
+
+    async def add_prediction(
+        self,
+        match_id: str,
+        *,
+        source: str,
+        league: str,
+        block: str,
+        team_a: str,
+        team_b: str,
+        best_of: int,
+        start_at: str,
+    ) -> bool:
+        """예측을 등록한다. 이미 있으면 아무것도 하지 않고 False."""
+        cur = await self.conn.execute(
+            "INSERT OR IGNORE INTO predictions"
+            "(match_id, source, league, block, team_a, team_b, best_of, start_at,"
+            " state, created_at)"
+            " VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'open', ?)",
+            (match_id, source, league, block, team_a, team_b, best_of, start_at, iso()),
+        )
+        await self.conn.commit()
+        return cur.rowcount > 0
+
+    async def drop_prediction(self, match_id: str) -> None:
+        """예측과 투표를 함께 지운다. (패널을 올리지 못했을 때 되돌리는 용도)"""
+        await self.conn.execute(
+            "DELETE FROM prediction_votes WHERE match_id = ?", (match_id,)
+        )
+        await self.conn.execute(
+            "DELETE FROM predictions WHERE match_id = ?", (match_id,)
+        )
+        await self.conn.commit()
+
+    async def get_prediction(self, match_id: str) -> Optional[aiosqlite.Row]:
+        return await self._fetchone(
+            "SELECT * FROM predictions WHERE match_id = ?", (match_id,)
+        )
+
+    async def prediction_by_message(self, message_id: int) -> Optional[aiosqlite.Row]:
+        return await self._fetchone(
+            "SELECT * FROM predictions WHERE message_id = ?", (message_id,)
+        )
+
+    async def set_prediction_message(
+        self, match_id: str, channel_id: int, message_id: int
+    ) -> None:
+        await self._exec(
+            "UPDATE predictions SET channel_id = ?, message_id = ? WHERE match_id = ?",
+            (channel_id, message_id, match_id),
+        )
+
+    async def update_prediction_start(self, match_id: str, start_at: str) -> None:
+        """경기가 미뤄졌을 때 시작 시각을 다시 맞춘다."""
+        await self._exec(
+            "UPDATE predictions SET start_at = ? WHERE match_id = ?",
+            (start_at, match_id),
+        )
+
+    async def set_prediction_state(self, match_id: str, state: str) -> None:
+        await self._exec(
+            "UPDATE predictions SET state = ? WHERE match_id = ?", (state, match_id)
+        )
+
+    async def resolve_prediction(self, match_id: str, winner: str) -> None:
+        await self._exec(
+            "UPDATE predictions SET state = 'resolved', winner = ? WHERE match_id = ?",
+            (winner, match_id),
+        )
+
+    async def predictions_in_states(self, states: Iterable[str]) -> list[aiosqlite.Row]:
+        wanted = tuple(states)
+        if not wanted:
+            return []
+        marks = ", ".join("?" * len(wanted))
+        return await self._fetchall(
+            f"SELECT * FROM predictions WHERE state IN ({marks}) ORDER BY start_at",
+            wanted,
+        )
+
+    async def cast_vote(self, match_id: str, user_id: int, pick: str) -> Optional[str]:
+        """투표를 넣거나 바꾼다. 이전에 고른 값을 돌려준다 (처음이면 None)."""
+        row = await self._fetchone(
+            "SELECT pick FROM prediction_votes WHERE match_id = ? AND user_id = ?",
+            (match_id, user_id),
+        )
+        before = str(row["pick"]) if row else None
+        await self._exec(
+            "INSERT INTO prediction_votes(match_id, user_id, pick, created_at)"
+            " VALUES (?, ?, ?, ?)"
+            " ON CONFLICT(match_id, user_id) DO UPDATE SET pick = excluded.pick,"
+            " created_at = excluded.created_at",
+            (match_id, user_id, pick, iso()),
+        )
+        return before
+
+    async def user_vote(self, match_id: str, user_id: int) -> Optional[str]:
+        row = await self._fetchone(
+            "SELECT pick FROM prediction_votes WHERE match_id = ? AND user_id = ?",
+            (match_id, user_id),
+        )
+        return str(row["pick"]) if row else None
+
+    async def vote_counts(self, match_id: str) -> tuple[int, int]:
+        rows = await self._fetchall(
+            "SELECT pick, COUNT(*) AS n FROM prediction_votes"
+            " WHERE match_id = ? GROUP BY pick",
+            (match_id,),
+        )
+        counts = {str(row["pick"]): int(row["n"]) for row in rows}
+        return counts.get("A", 0), counts.get("B", 0)
+
+    async def voters(self, match_id: str, pick: str) -> list[int]:
+        rows = await self._fetchall(
+            "SELECT user_id FROM prediction_votes WHERE match_id = ? AND pick = ?",
+            (match_id, pick),
+        )
+        return [int(row["user_id"]) for row in rows]
+
+    async def prediction_stats(self, user_id: int) -> tuple[int, int]:
+        """(맞힌 수, 결과가 나온 참여 수)."""
+        row = await self._fetchone(
+            "SELECT COUNT(*) AS total,"
+            " SUM(CASE WHEN v.pick = p.winner THEN 1 ELSE 0 END) AS correct"
+            " FROM prediction_votes v JOIN predictions p ON p.match_id = v.match_id"
+            " WHERE v.user_id = ? AND p.state = 'resolved' AND p.winner IS NOT NULL",
+            (user_id,),
+        )
+        if row is None:
+            return 0, 0
+        return int(row["correct"] or 0), int(row["total"] or 0)
+
+    async def prediction_leaderboard(self, limit: int = 10) -> list[aiosqlite.Row]:
+        """적중 수가 많은 순. 같으면 참여가 적은(=정확도 높은) 쪽이 위."""
+        return await self._fetchall(
+            "SELECT v.user_id,"
+            " SUM(CASE WHEN v.pick = p.winner THEN 1 ELSE 0 END) AS correct,"
+            " COUNT(*) AS total"
+            " FROM prediction_votes v JOIN predictions p ON p.match_id = v.match_id"
+            " WHERE p.state = 'resolved' AND p.winner IS NOT NULL"
+            " GROUP BY v.user_id"
+            " HAVING correct > 0"
+            " ORDER BY correct DESC, total ASC"
+            " LIMIT ?",
+            (limit,),
         )

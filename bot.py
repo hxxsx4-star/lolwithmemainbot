@@ -11,6 +11,7 @@ from discord.ext import commands
 from config import GUILD_ID, TOKEN
 from core.checks import MissingStaff
 from core.db import Database
+from utils.esports import EsportsClient
 from utils.riot import RiotClient
 
 EXTENSIONS = (
@@ -24,6 +25,7 @@ EXTENSIONS = (
     "cogs.scrim",
     "cogs.onboarding",
     "cogs.reaction_roles",
+    "cogs.prediction",
     "cogs.backup",
     "cogs.helpcmd",
 )
@@ -55,6 +57,7 @@ class MainBot(commands.Bot):
         )
         self.db = Database()
         self.riot = RiotClient()
+        self.esports = EsportsClient()
 
     async def setup_hook(self) -> None:
         await self.db.connect()
@@ -80,6 +83,7 @@ class MainBot(commands.Bot):
 
     async def close(self) -> None:
         await self.riot.close()
+        await self.esports.close()
         await self.db.close()
         await super().close()
 

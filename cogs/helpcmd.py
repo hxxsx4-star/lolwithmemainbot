@@ -12,6 +12,7 @@ from config import (
     Economy,
     LCK_TEAMS,
     Level,
+    Prediction as PredictionConfig,
     Roles,
     SHOP_THEME_KEYS,
     Shop,
@@ -65,6 +66,15 @@ GENERAL_SECTIONS: list[tuple[str, str]] = [
         f"(Lv.0→1 은 {Level.BASE_XP}XP, 약 4시간)\n"
         f"→ 채팅은 메시지당 **{Level.CHAT_XP_PER_MESSAGE}XP** "
         f"({Level.CHAT_COOLDOWN_SECONDS}초 쿨타임)",
+    ),
+    (
+        "🎯 승부예측",
+        f"<#{Channels.PREDICTION}> 에 프로 경기가 **시작 {PredictionConfig.LEAD_HOURS}시간 전**에 "
+        f"자동으로 올라옵니다.\n"
+        f"버튼으로 이길 팀을 고르면 되고, 경기 시작 전까지 바꿀 수 있습니다.\n"
+        f"→ 맞히면 **{PredictionConfig.CORRECT_REWARD:,}{Economy.UNIT}**, 틀려도 잃지 않습니다.\n"
+        f"→ LCK · MSI · 월드 챔피언십 · EWC 는 자동, 아시안게임은 관리자가 직접 올립니다.\n"
+        f"`/예측순위` 적중 순위와 내 기록",
     ),
     (
         "🪪 프로필",
@@ -140,6 +150,16 @@ ADMIN_SECTIONS: list[tuple[str, str]] = [
         f"→ 같은 이름의 역할이 이미 있으면 새로 만들지 않고 그것을 씁니다.\n"
         f"→ 만든 뒤 **봇 역할을 그 역할들보다 위로** 올려 주세요.\n"
         f"→ 구매 내역은 <#{Channels.POINT_LOG}> 에 기록됩니다.",
+    ),
+    (
+        "🎯 승부예측 관리",
+        f"`/경기추가 [대회] [팀A] [팀B] [시작] [판수]` 직접 등록 (아시안게임 등)\n"
+        f"`/경기결과 [경기ID] [승자]` 수동 경기 정산\n"
+        f"`/경기취소 [경기ID]` 예측 취소 (포인트 지급 없음)\n"
+        f"`/예측목록` 진행 중인 예측과 경기 ID\n"
+        f"`/리그목록` 일정 서버가 주는 대회 목록 확인\n"
+        f"→ LCK · MSI · 월드 챔피언십 · EWC 는 시작 "
+        f"{PredictionConfig.LEAD_HOURS}시간 전에 자동으로 올라가고 결과도 자동 정산됩니다.",
     ),
     (
         "💾 백업",
