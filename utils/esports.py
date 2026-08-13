@@ -266,10 +266,16 @@ class EsportsClient:
     # ---------------------------------------------------------------- 일정
 
     async def schedule(self, league_ids: Sequence[str]) -> list[Match]:
-        """해당 대회들의 최근 · 예정 경기를 가져온다."""
+        """해당 대회들의 최근 · 예정 경기를 가져온다.
+
+        대회 ID 는 **쉼표로 이어 붙여 한 번만** 넘겨야 한다. `leagueId` 를
+        여러 번 반복해서 붙이면 (`leagueId=A&leagueId=B`) 서버가 거의 빈
+        응답을 돌려준다. 예전에 그렇게 보내는 바람에 6개 대회를 넘겼을 때
+        경기가 1건만 들어와 자동 등록이 통째로 멎어 있었다.
+        """
         if not league_ids:
             return []
-        params = [("leagueId", lid) for lid in league_ids]
+        params = [("leagueId", ",".join(league_ids))]
         data = await self._get("getSchedule", params)
         events = (
             ((data.get("data") or {}).get("schedule") or {}).get("events")
