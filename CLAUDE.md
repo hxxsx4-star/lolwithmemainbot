@@ -21,12 +21,28 @@ python bot.py
 
 ## 운영
 
-봇은 VM 에서 tmux 세션으로 돈다.
+봇은 VM 에서 systemd user 서비스로 돈다. 메인봇과 로그봇이 각각 하나씩이다.
 
 ```bash
-tmux attach -t bot      # 붙기 (빠져나올 땐 Ctrl+B, D)
-tmux kill-session -t bot && tmux new -s bot -d 'cd ~/lolwithmemainbot && .venv/bin/python bot.py'
+systemctl --user status  lolwithme-mainbot        # 상태
+systemctl --user restart lolwithme-mainbot        # 재시작
+journalctl --user -u lolwithme-mainbot -f         # 로그 따라 보기
+journalctl --user -u lolwithme-mainbot -n 200     # 최근 로그
 ```
+
+로그봇은 `lolwithme-logbot` 으로 같은 명령을 쓴다. 유닛 파일은
+`~/.config/systemd/user/` 에 있고 저장소에는 없다.
+
+크래시나 게이트웨이 끊김은 10초 뒤 자동 재시작된다. 다만 **5분에 5번 넘게 죽으면
+포기하고 `failed` 로 멈춘다** — 토큰 만료처럼 고쳐야만 하는 실패로 무한 재시작이
+도는 걸 막으려는 것이다. 이때는 원인을 고친 뒤
+`systemctl --user reset-failed lolwithme-mainbot` 하고 다시 시작한다.
+
+`loginctl enable-linger` 를 걸어 뒀기 때문에 SSH 를 끊거나 재부팅해도 계속 돈다.
+
+**tmux 로 띄우지 않는다.** 예전에는 그렇게 했는데, 세션을 실수로 죽이면 아무도
+되살리지 않았고 재부팅도 못 넘겼다. 손으로 띄우면 systemd 쪽과 **중복 실행이 되어
+포인트가 이중 지급**되니, 반드시 위 명령만 쓴다.
 
 배포는 `git pull` 후 재시작이다. 마이그레이션 스크립트는 없고, `core/db.py` 의
 `_migrate()` 가 뜰 때 빠진 컬럼을 `ALTER TABLE` 로 채운다.
