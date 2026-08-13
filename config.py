@@ -452,6 +452,14 @@ ESPORTS_LEAGUES: tuple[str, ...] = (
     "esports world cup",
 )
 
+# 위 목록에 부분 일치로 딸려 오지만 올리고 싶지 않은 대회. 제외가 우선한다.
+# `lck` 는 `lck_challengers_league` 에도 걸리는데, 2군 경기까지 올라오면
+# 채널이 지저분해져서 뺀다.
+ESPORTS_LEAGUES_EXCLUDE: tuple[str, ...] = (
+    "lck_challengers_league",
+    "challengers",
+)
+
 # 대회 이름을 한국어로 보여줄 때 쓰는 표기 (없으면 API 이름 그대로)
 LEAGUE_NAMES: dict[str, str] = {
     "lck": "LCK",

@@ -17,6 +17,7 @@ from config import (
     ESPORTS_API_KEY,
     ESPORTS_BASE_URL,
     ESPORTS_LEAGUES,
+    ESPORTS_LEAGUES_EXCLUDE,
     ESPORTS_LOCALE,
 )
 
@@ -243,17 +244,24 @@ class EsportsClient:
 
     @staticmethod
     def pick_leagues(
-        leagues: Iterable[League], wanted: Sequence[str] = ESPORTS_LEAGUES
+        leagues: Iterable[League],
+        wanted: Sequence[str] = ESPORTS_LEAGUES,
+        excluded: Sequence[str] = ESPORTS_LEAGUES_EXCLUDE,
     ) -> list[League]:
         """slug 가 정확히 같거나 대회 이름에 들어 있는 것을 고른다.
 
-        slug 는 시즌마다 바뀌기도 해서 이름 부분 일치까지 함께 본다.
+        slug 는 시즌마다 바뀌기도 해서 이름 부분 일치까지 함께 본다. 다만
+        부분 일치는 원하지 않는 것까지 끌어온다. `lck` 가 `lck_challengers_league`
+        에도 걸리는 식이다. 그래서 제외 목록을 먼저 본다.
         """
         keys = [w.strip().lower() for w in wanted if w.strip()]
+        blocked = [w.strip().lower() for w in excluded if w.strip()]
         chosen: dict[str, League] = {}
         for league in leagues:
             slug = league.slug.lower()
             name = league.name.lower()
+            if any(key == slug or key in slug or key in name for key in blocked):
+                continue
             for key in keys:
                 if slug == key or key in name or key in slug:
                     chosen[league.id] = league
