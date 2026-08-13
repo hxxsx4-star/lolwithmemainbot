@@ -133,6 +133,8 @@ CREATE TABLE IF NOT EXISTS predictions (
     message_id INTEGER,
     state      TEXT NOT NULL DEFAULT 'open',  -- open / closed / resolved / cancelled
     winner     TEXT,                   -- 'A' / 'B'
+    image_a    TEXT,                   -- 팀 로고 URL (없을 수 있다)
+    image_b    TEXT,
     created_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_predictions_state ON predictions(state);
@@ -142,6 +144,8 @@ CREATE TABLE IF NOT EXISTS prediction_votes (
     match_id   TEXT NOT NULL,
     user_id    INTEGER NOT NULL,
     pick       TEXT NOT NULL,          -- 'A' / 'B'
+    amount     INTEGER NOT NULL DEFAULT 0,  -- 건 포인트
+    payout     INTEGER,                -- 정산으로 돌려받은 포인트. NULL 이면 미정산
     created_at TEXT NOT NULL,
     PRIMARY KEY (match_id, user_id)
 );
@@ -258,23 +262,39 @@ class Database:
         await self._migrate()
 
     async def _migrate(self) -> None:
-        """예전 버전에서 만들어진 DB 에 빠진 컬럼을 채워 넣는다."""
-        additions = {
-            "voice_xp": "INTEGER NOT NULL DEFAULT 0",
-            "chat_xp": "INTEGER NOT NULL DEFAULT 0",
-            "rank_solo": "TEXT",
-            "rank_flex": "TEXT",
-            "rank_updated_at": "TEXT",
-        }
-        async with self.conn.execute("PRAGMA table_info(users)") as cur:
-            existing = {row["name"] for row in await cur.fetchall()}
+        """예전 버전에서 만들어진 DB 에 빠진 컬럼을 채워 넣는다.
 
-        for column, definition in additions.items():
-            if column in existing:
-                continue
-            await self.conn.execute(
-                f"ALTER TABLE users ADD COLUMN {column} {definition}"
-            )
+        `CREATE TABLE IF NOT EXISTS` 는 이미 있는 테이블을 건드리지 않으므로,
+        스키마에 컬럼을 새로 추가했으면 여기에도 같이 적어 줘야 한다.
+        """
+        additions: dict[str, dict[str, str]] = {
+            "users": {
+                "voice_xp": "INTEGER NOT NULL DEFAULT 0",
+                "chat_xp": "INTEGER NOT NULL DEFAULT 0",
+                "rank_solo": "TEXT",
+                "rank_flex": "TEXT",
+                "rank_updated_at": "TEXT",
+            },
+            "predictions": {
+                "image_a": "TEXT",
+                "image_b": "TEXT",
+            },
+            "prediction_votes": {
+                # 베팅 도입 전의 표는 건 포인트가 없으므로 0 으로 남는다
+                "amount": "INTEGER NOT NULL DEFAULT 0",
+                "payout": "INTEGER",
+            },
+        }
+
+        for table, columns in additions.items():
+            async with self.conn.execute(f"PRAGMA table_info({table})") as cur:
+                existing = {row["name"] for row in await cur.fetchall()}
+            for column, definition in columns.items():
+                if column in existing:
+                    continue
+                await self.conn.execute(
+                    f"ALTER TABLE {table} ADD COLUMN {column} {definition}"
+                )
         await self.conn.commit()
 
     async def close(self) -> None:
@@ -299,6 +319,17 @@ class Database:
     async def _fetchall(self, sql: str, params: Iterable[Any] = ()):
         async with self.conn.execute(sql, tuple(params)) as cur:
             return await cur.fetchall()
+
+    async def _exec_count(self, sql: str, params: Iterable[Any] = ()) -> int:
+        """실제로 바뀐 행 수를 돌려준다.
+
+        조건을 건 UPDATE 나 `DO NOTHING` INSERT 가 먹었는지 확인할 때 쓴다.
+        읽고 나서 쓰는 방식과 달리 한 문장이라, 버튼을 연타해도 중간에 끼어들
+        틈이 없다.
+        """
+        cur = await self.conn.execute(sql, tuple(params))
+        await self.conn.commit()
+        return cur.rowcount
 
     # ------------------------------------------------------------- 유저
 
@@ -740,14 +771,19 @@ class Database:
         team_b: str,
         best_of: int,
         start_at: str,
+        image_a: str = "",
+        image_b: str = "",
     ) -> bool:
         """예측을 등록한다. 이미 있으면 아무것도 하지 않고 False."""
         cur = await self.conn.execute(
             "INSERT OR IGNORE INTO predictions"
             "(match_id, source, league, block, team_a, team_b, best_of, start_at,"
-            " state, created_at)"
-            " VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'open', ?)",
-            (match_id, source, league, block, team_a, team_b, best_of, start_at, iso()),
+            " image_a, image_b, state, created_at)"
+            " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'open', ?)",
+            (
+                match_id, source, league, block, team_a, team_b, best_of, start_at,
+                image_a or None, image_b or None, iso(),
+            ),
         )
         await self.conn.commit()
         return cur.rowcount > 0
@@ -780,6 +816,14 @@ class Database:
             (channel_id, message_id, match_id),
         )
 
+    async def clear_prediction_images(self, match_id: str) -> None:
+        """배너를 못 만들었을 때 로고 주소를 지운다."""
+        await self._exec(
+            "UPDATE predictions SET image_a = NULL, image_b = NULL"
+            " WHERE match_id = ?",
+            (match_id,),
+        )
+
     async def update_prediction_start(self, match_id: str, start_at: str) -> None:
         """경기가 미뤄졌을 때 시작 시각을 다시 맞춘다."""
         await self._exec(
@@ -808,69 +852,119 @@ class Database:
             wanted,
         )
 
-    async def cast_vote(self, match_id: str, user_id: int, pick: str) -> Optional[str]:
-        """투표를 넣거나 바꾼다. 이전에 고른 값을 돌려준다 (처음이면 None)."""
-        row = await self._fetchone(
-            "SELECT pick FROM prediction_votes WHERE match_id = ? AND user_id = ?",
-            (match_id, user_id),
+    async def place_bet(
+        self, match_id: str, user_id: int, pick: str, amount: int, *, reason: str
+    ) -> str:
+        """포인트를 걸고 예측을 기록한다. `ok` / `dup` / `poor` 를 돌려준다.
+
+        먼저 자리를 잡고(INSERT) 나서 포인트를 뺀다. 순서를 이렇게 둬야
+        버튼을 연타해도 중복 베팅이 원천적으로 막힌다. 포인트가 모자라
+        차감에 실패하면 잡아 둔 자리를 도로 지운다.
+        """
+        await self.ensure_user(user_id)
+
+        claimed = await self._exec_count(
+            "INSERT INTO prediction_votes(match_id, user_id, pick, amount, created_at)"
+            " VALUES (?, ?, ?, ?, ?)"
+            " ON CONFLICT(match_id, user_id) DO NOTHING",
+            (match_id, user_id, pick, amount, iso()),
         )
-        before = str(row["pick"]) if row else None
+        if not claimed:
+            return "dup"
+
+        paid = await self._exec_count(
+            "UPDATE users SET points = points - ? WHERE user_id = ? AND points >= ?",
+            (amount, user_id, amount),
+        )
+        if not paid:
+            await self._exec(
+                "DELETE FROM prediction_votes WHERE match_id = ? AND user_id = ?",
+                (match_id, user_id),
+            )
+            return "poor"
+
+        balance = await self.get_points(user_id)
         await self._exec(
-            "INSERT INTO prediction_votes(match_id, user_id, pick, created_at)"
-            " VALUES (?, ?, ?, ?)"
-            " ON CONFLICT(match_id, user_id) DO UPDATE SET pick = excluded.pick,"
-            " created_at = excluded.created_at",
-            (match_id, user_id, pick, iso()),
+            "INSERT INTO point_log(user_id, delta, balance, reason, actor_id, created_at)"
+            " VALUES (?, ?, ?, ?, ?, ?)",
+            (user_id, -amount, balance, reason, None, iso()),
         )
-        return before
+        return "ok"
 
-    async def user_vote(self, match_id: str, user_id: int) -> Optional[str]:
-        row = await self._fetchone(
-            "SELECT pick FROM prediction_votes WHERE match_id = ? AND user_id = ?",
+    async def user_bet(self, match_id: str, user_id: int) -> Optional[aiosqlite.Row]:
+        """이 사람이 이 경기에 건 내역. 안 걸었으면 None."""
+        return await self._fetchone(
+            "SELECT pick, amount, payout FROM prediction_votes"
+            " WHERE match_id = ? AND user_id = ?",
             (match_id, user_id),
         )
-        return str(row["pick"]) if row else None
 
-    async def vote_counts(self, match_id: str) -> tuple[int, int]:
+    async def bet_pools(self, match_id: str) -> tuple[int, int, int, int]:
+        """(A 에 걸린 포인트, B 에 걸린 포인트, A 인원, B 인원)."""
         rows = await self._fetchall(
-            "SELECT pick, COUNT(*) AS n FROM prediction_votes"
-            " WHERE match_id = ? GROUP BY pick",
+            "SELECT pick, COALESCE(SUM(amount), 0) AS total, COUNT(*) AS n"
+            " FROM prediction_votes WHERE match_id = ? GROUP BY pick",
             (match_id,),
         )
-        counts = {str(row["pick"]): int(row["n"]) for row in rows}
-        return counts.get("A", 0), counts.get("B", 0)
+        pools = {
+            str(row["pick"]): (int(row["total"]), int(row["n"])) for row in rows
+        }
+        pool_a, count_a = pools.get("A", (0, 0))
+        pool_b, count_b = pools.get("B", (0, 0))
+        return pool_a, pool_b, count_a, count_b
 
-    async def voters(self, match_id: str, pick: str) -> list[int]:
-        rows = await self._fetchall(
-            "SELECT user_id FROM prediction_votes WHERE match_id = ? AND pick = ?",
+    async def bets_on(self, match_id: str, pick: str) -> list[aiosqlite.Row]:
+        """한쪽에 건 사람들의 (user_id, amount)."""
+        return await self._fetchall(
+            "SELECT user_id, amount FROM prediction_votes"
+            " WHERE match_id = ? AND pick = ?",
             (match_id, pick),
         )
-        return [int(row["user_id"]) for row in rows]
 
-    async def prediction_stats(self, user_id: int) -> tuple[int, int]:
-        """(맞힌 수, 결과가 나온 참여 수)."""
+    async def all_bets(self, match_id: str) -> list[aiosqlite.Row]:
+        return await self._fetchall(
+            "SELECT user_id, pick, amount FROM prediction_votes WHERE match_id = ?",
+            (match_id,),
+        )
+
+    async def set_bet_payout(self, match_id: str, user_id: int, payout: int) -> None:
+        await self._exec(
+            "UPDATE prediction_votes SET payout = ?"
+            " WHERE match_id = ? AND user_id = ?",
+            (payout, match_id, user_id),
+        )
+
+    async def prediction_stats(self, user_id: int) -> tuple[int, int, int]:
+        """(맞힌 수, 결과가 나온 참여 수, 순수익).
+
+        순수익은 `받은 돈 - 건 돈` 이라 음수가 될 수 있다. 취소돼 환불된
+        경기는 payout 과 amount 가 같아 자연히 0 으로 계산된다.
+        """
         row = await self._fetchone(
             "SELECT COUNT(*) AS total,"
-            " SUM(CASE WHEN v.pick = p.winner THEN 1 ELSE 0 END) AS correct"
+            " SUM(CASE WHEN v.pick = p.winner THEN 1 ELSE 0 END) AS correct,"
+            " COALESCE(SUM(COALESCE(v.payout, 0) - v.amount), 0) AS profit"
             " FROM prediction_votes v JOIN predictions p ON p.match_id = v.match_id"
             " WHERE v.user_id = ? AND p.state = 'resolved' AND p.winner IS NOT NULL",
             (user_id,),
         )
         if row is None:
-            return 0, 0
-        return int(row["correct"] or 0), int(row["total"] or 0)
+            return 0, 0, 0
+        return int(row["correct"] or 0), int(row["total"] or 0), int(row["profit"] or 0)
 
     async def prediction_leaderboard(self, limit: int = 10) -> list[aiosqlite.Row]:
-        """적중 수가 많은 순. 같으면 참여가 적은(=정확도 높은) 쪽이 위."""
+        """순수익이 큰 순. 베팅이 되면서 '몇 번 맞혔나' 보다 '얼마 벌었나' 가
+        실력을 더 잘 나타내므로 수익 기준으로 줄을 세운다."""
         return await self._fetchall(
             "SELECT v.user_id,"
             " SUM(CASE WHEN v.pick = p.winner THEN 1 ELSE 0 END) AS correct,"
-            " COUNT(*) AS total"
+            " COUNT(*) AS total,"
+            " COALESCE(SUM(COALESCE(v.payout, 0) - v.amount), 0) AS profit"
             " FROM prediction_votes v JOIN predictions p ON p.match_id = v.match_id"
             " WHERE p.state = 'resolved' AND p.winner IS NOT NULL"
             " GROUP BY v.user_id"
-            " HAVING correct > 0"
-            " ORDER BY correct DESC, total ASC"
+            " HAVING profit > 0"
+            " ORDER BY profit DESC, correct DESC"
             " LIMIT ?",
             (limit,),
         )

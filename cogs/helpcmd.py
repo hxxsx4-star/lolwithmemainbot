@@ -71,10 +71,14 @@ GENERAL_SECTIONS: list[tuple[str, str]] = [
         "🎯 승부예측",
         f"<#{Channels.PREDICTION}> 에 프로 경기가 **시작 {PredictionConfig.LEAD_HOURS}시간 전**에 "
         f"자동으로 올라옵니다.\n"
-        f"버튼으로 이길 팀을 고르면 되고, 경기 시작 전까지 바꿀 수 있습니다.\n"
-        f"→ 맞히면 **{PredictionConfig.CORRECT_REWARD:,}{Economy.UNIT}**, 틀려도 잃지 않습니다.\n"
+        f"버튼으로 이길 팀에 포인트를 겁니다. 최소 "
+        f"**{PredictionConfig.MIN_BET:,}{Economy.UNIT}**, 상한은 없습니다.\n"
+        f"→ 양쪽에 걸린 포인트를 맞힌 사람들이 **건 비율대로 나눠 갖습니다.** "
+        f"인기 없는 쪽에 걸수록 배당이 큽니다.\n"
+        f"→ **틀리면 건 포인트를 잃고, 한 번 걸면 바꿀 수 없습니다.**\n"
+        f"→ 경기 시작 {PredictionConfig.CLOSE_BEFORE_MINUTES}분 전에 마감됩니다.\n"
         f"→ LCK · MSI · 월드 챔피언십 · EWC 는 자동, 아시안게임은 관리자가 직접 올립니다.\n"
-        f"`/예측순위` 적중 순위와 내 기록",
+        f"`/예측순위` 수익 순위와 내 기록",
     ),
     (
         "🪪 프로필",
