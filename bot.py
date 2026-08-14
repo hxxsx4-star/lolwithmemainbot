@@ -27,6 +27,7 @@ EXTENSIONS = (
     "cogs.reaction_roles",
     "cogs.prediction",
     "cogs.backup",
+    "cogs.watchdog",
     "cogs.helpcmd",
 )
 

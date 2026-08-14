@@ -45,6 +45,7 @@ class Channels:
     SCRIM_FORUM = 1536049980836548720      # 내전 포럼 채널
     ROLE_PICKER = 1536153863441223760      # 이모지로 라인 역할을 고르는 채널
     PREDICTION = 1537005994884997200       # 프로 경기 승부예측
+    STAFF_ALERT = 1160943152409104556      # 봇 이상 징후를 관리진에게 알리는 곳
 
 
 class Roles:
@@ -431,6 +432,10 @@ class Prediction:
     MIN_BET = 100              # 최소 베팅액. 상한은 없다 (보유 포인트 전부 가능)
     MAX_POST_PER_TICK = 8      # 한 번에 올릴 수 있는 예측 수 (레이트 리밋 보호)
 
+    # 패널은 24시간 전에 올라가서 그대로 두면 묻힌다. 마감 직전에 한 번 더
+    # 알려 참여를 받는다. 주기가 POLL_MINUTES 라 이보다 촘촘하게는 못 잡는다.
+    REMIND_BEFORE_MINUTES = 30
+
 
 # 승부예측 일정을 가져올 곳. lolesports.com 웹사이트가 그대로 쓰는 공개 API 다.
 # 이 키는 라이엇 웹 프론트엔드에 박혀 있는 공개 키라서 따로 발급받지 않아도 된다.
@@ -468,6 +473,21 @@ LEAGUE_NAMES: dict[str, str] = {
     "ewc": "EWC",
     "esports_world_cup": "EWC",
 }
+
+
+class Watchdog:
+    """봇이 조용히 고장 났는지 스스로 살피는 주기와 기준.
+
+    이 봇이 고장 나는 방식은 대개 "에러를 내며 멈추는" 것이 아니라 **아무
+    일도 일어나지 않는** 것이다. 대회 slug 가 바뀌어 승부예측이 안 올라오거나,
+    수동 경기 정산을 잊어 포인트가 묶인 채로 남는 식이다. 사람이 눈치채기까지
+    오래 걸리므로 봇이 직접 알린다.
+    """
+
+    CHECK_HOURS = 6            # 점검 주기
+    STALE_REGISTER_DAYS = 3    # 이 기간 자동 등록이 0건이면 멎은 것으로 본다
+    STALE_SETTLE_HOURS = 6     # 마감 뒤 이만큼 지나도 정산이 안 되면 알린다
+    REPEAT_HOURS = 24          # 같은 경고를 다시 보내기까지의 간격 (도배 방지)
 
 
 class Warning:

@@ -135,6 +135,7 @@ CREATE TABLE IF NOT EXISTS predictions (
     winner     TEXT,                   -- 'A' / 'B'
     image_a    TEXT,                   -- 팀 로고 URL (없을 수 있다)
     image_b    TEXT,
+    reminded_at TEXT,                  -- 마감 임박 알림을 보낸 시각
     created_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_predictions_state ON predictions(state);
@@ -278,6 +279,7 @@ class Database:
             "predictions": {
                 "image_a": "TEXT",
                 "image_b": "TEXT",
+                "reminded_at": "TEXT",
             },
             "prediction_votes": {
                 # 베팅 도입 전의 표는 건 포인트가 없으므로 0 으로 남는다
@@ -816,6 +818,19 @@ class Database:
             (channel_id, message_id, match_id),
         )
 
+    async def mark_reminded(self, match_id: str) -> bool:
+        """마감 임박 알림을 보냈다고 표시한다.
+
+        `reminded_at IS NULL` 을 조건으로 걸어, 한 경기에 알림이 두 번 나가지
+        않게 한다. 표시에 성공한 쪽만 실제로 알림을 보낸다.
+        """
+        changed = await self._exec_count(
+            "UPDATE predictions SET reminded_at = ?"
+            " WHERE match_id = ? AND reminded_at IS NULL",
+            (iso(), match_id),
+        )
+        return bool(changed)
+
     async def clear_prediction_images(self, match_id: str) -> None:
         """배너를 못 만들었을 때 로고 주소를 지운다."""
         await self._exec(
@@ -927,11 +942,72 @@ class Database:
             (match_id,),
         )
 
+    async def settled_bets(self, match_id: str) -> list[aiosqlite.Row]:
+        """정산이 끝나 payout 이 적힌 베팅. 재정산할 때 되돌릴 대상이다."""
+        return await self._fetchall(
+            "SELECT user_id, pick, amount, payout FROM prediction_votes"
+            " WHERE match_id = ? AND payout IS NOT NULL",
+            (match_id,),
+        )
+
+    async def clear_bet_payouts(self, match_id: str) -> None:
+        """정산 기록을 지워 다시 정산할 수 있게 한다."""
+        await self._exec(
+            "UPDATE prediction_votes SET payout = NULL WHERE match_id = ?",
+            (match_id,),
+        )
+
+    async def reopen_prediction(self, match_id: str) -> None:
+        """정산을 취소하고 마감 상태로 되돌린다."""
+        await self._exec(
+            "UPDATE predictions SET state = 'closed', winner = NULL"
+            " WHERE match_id = ?",
+            (match_id,),
+        )
+
     async def set_bet_payout(self, match_id: str, user_id: int, payout: int) -> None:
         await self._exec(
             "UPDATE prediction_votes SET payout = ?"
             " WHERE match_id = ? AND user_id = ?",
             (payout, match_id, user_id),
+        )
+
+    async def predictions_created_since(self, since_iso: str) -> int:
+        """그 시각 이후로 새로 등록된 예측 수. 자동 등록이 도는지 볼 때 쓴다."""
+        row = await self._fetchone(
+            "SELECT COUNT(*) AS n FROM predictions WHERE created_at >= ?",
+            (since_iso,),
+        )
+        return int(row["n"]) if row else 0
+
+    async def stale_predictions(self, before_iso: str) -> list[aiosqlite.Row]:
+        """시작 시각이 한참 지났는데 아직 정산이 안 된 경기.
+
+        수동 경기 정산을 잊었거나 경기가 무산된 경우다. 둘 다 사람이 손대야
+        하고, 방치하면 건 포인트가 묶인 채로 남는다.
+        """
+        return await self._fetchall(
+            "SELECT p.match_id, p.source, p.league, p.team_a, p.team_b, p.state,"
+            " p.start_at,"
+            " (SELECT COUNT(*) FROM prediction_votes v WHERE v.match_id = p.match_id)"
+            "   AS bettors,"
+            " (SELECT COALESCE(SUM(v.amount), 0) FROM prediction_votes v"
+            "   WHERE v.match_id = p.match_id) AS pool"
+            " FROM predictions p"
+            " WHERE p.state IN ('open', 'closed') AND p.start_at < ?"
+            " ORDER BY p.start_at",
+            (before_iso,),
+        )
+
+    async def open_bets_for(self, user_id: int) -> list[aiosqlite.Row]:
+        """아직 결과가 안 나온 내 베팅."""
+        return await self._fetchall(
+            "SELECT p.match_id, p.league, p.team_a, p.team_b, p.state, p.start_at,"
+            " v.pick, v.amount"
+            " FROM prediction_votes v JOIN predictions p ON p.match_id = v.match_id"
+            " WHERE v.user_id = ? AND p.state IN ('open', 'closed')"
+            " ORDER BY p.start_at",
+            (user_id,),
         )
 
     async def prediction_stats(self, user_id: int) -> tuple[int, int, int]:

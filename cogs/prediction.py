@@ -27,6 +27,7 @@ from config import (
     Channels,
     Colors,
     Economy,
+    GUILD_ID,
     LEAGUE_NAMES,
     Prediction as Config,
     TIMEZONE,
@@ -647,6 +648,31 @@ class PredictionCog(commands.Cog, name="Prediction"):
         log.info("승부예측 정산: %s (%s 승) · %s", match_id, winner_name, summary)
         return paid
 
+    async def _unwind(self, row) -> tuple[int, int]:
+        """정산으로 내준 포인트를 도로 걷는다. (되돌린 인원, 못 걷은 포인트).
+
+        받은 포인트를 이미 다 써 버린 사람은 잔액이 0 에서 멈춰 전부 걷지
+        못한다. 그 모자란 양을 같이 돌려줘서, 재정산이 완전하지 않았다는 걸
+        관리진이 알 수 있게 한다.
+        """
+        match_id = str(row["match_id"])
+        reason = f"승부예측 재정산(이전 정산 취소) — {row['league']}"
+        undone = shortfall = 0
+
+        for bet in await self.bot.db.settled_bets(match_id):
+            payout = int(bet["payout"] or 0)
+            if payout <= 0:
+                continue
+            user_id = int(bet["user_id"])
+            before = await self.bot.db.get_points(user_id)
+            after = await self.bot.db.add_points(user_id, -payout, reason)
+            shortfall += payout - (before - after)
+            undone += 1
+
+        await self.bot.db.clear_bet_payouts(match_id)
+        await self.bot.db.reopen_prediction(match_id)
+        return undone, shortfall
+
     async def _refund(self, match_id: str, *, reason: str) -> int:
         """건 포인트를 전부 돌려준다. 돌려받은 인원을 반환한다."""
         refunded = 0
@@ -676,9 +702,69 @@ class PredictionCog(commands.Cog, name="Prediction"):
         if matches:
             await self._post_upcoming(matches)
             await self._refresh_times(matches)
+        await self._remind_closing()
         await self._close_started(matches)
         if matches:
             await self._resolve_finished(matches)
+
+    async def _remind_closing(self) -> None:
+        """마감이 얼마 안 남은 경기를 채널에 한 번 더 알린다.
+
+        패널은 24시간 전에 올라가서 그대로 두면 묻힌다. 마감 직전에 현재
+        판돈과 배당을 붙여 다시 띄운다. 한 경기에 한 번만 보낸다.
+        """
+        now = dt.datetime.now(dt.timezone.utc)
+        window = dt.timedelta(
+            minutes=Config.CLOSE_BEFORE_MINUTES + Config.REMIND_BEFORE_MINUTES
+        )
+        closing = dt.timedelta(minutes=Config.CLOSE_BEFORE_MINUTES)
+
+        for row in await self.bot.db.predictions_in_states([STATE_OPEN]):
+            if row["reminded_at"]:
+                continue
+            left = parse_utc(str(row["start_at"])) - now
+            if left > window or left <= closing:
+                continue
+
+            match_id = str(row["match_id"])
+
+            # 표시를 먼저 한다. 아래에서 그만두더라도 이 경기는 다시 안 본다
+            if not await self.bot.db.mark_reminded(match_id):
+                continue
+
+            pool_a, pool_b, count_a, count_b = await self.bot.db.bet_pools(match_id)
+            total = pool_a + pool_b
+            if total <= 0:
+                # 아무도 안 건 경기를 다시 띄우면 채널만 시끄럽다
+                continue
+
+            team_a, team_b = str(row["team_a"]), str(row["team_b"])
+            unit = Economy.UNIT
+            closes_at = parse_utc(str(row["start_at"])) - closing
+
+            description = (
+                f"**{row['league']}** · {team_a} vs {team_b}\n"
+                f"마감 {discord.utils.format_dt(closes_at, 'R')}"
+            )
+            if row["channel_id"] and row["message_id"]:
+                description += (
+                    f"\n[베팅하러 가기](https://discord.com/channels/"
+                    f"{GUILD_ID}/{row['channel_id']}/{row['message_id']})"
+                )
+
+            embed = base_embed("⏰ 곧 마감됩니다", Colors.DANGER, description=description)
+            embed.add_field(
+                name=f"현재 판돈 {total:,}{unit} · {count_a + count_b}명",
+                value=(
+                    f"**{team_a}** · {fmt_odds(payout_odds(pool_a, total))}\n"
+                    f"`{bar(pool_a, total)}`\n\n"
+                    f"**{team_b}** · {fmt_odds(payout_odds(pool_b, total))}\n"
+                    f"`{bar(pool_b, total)}`"
+                ),
+                inline=False,
+            )
+            await send_log(self.bot, Channels.PREDICTION, embed)
+            log.info("마감 임박 알림: %s %s vs %s", row["league"], team_a, team_b)
 
     async def fetch_matches(self) -> list[Match]:
         if not self._league_ids:
@@ -833,6 +919,58 @@ class PredictionCog(commands.Cog, name="Prediction"):
         await interaction.response.send_message(embed=embed)
 
     @app_commands.command(
+        name="내베팅", description="아직 결과가 안 나온 내 베팅을 모아 봅니다."
+    )
+    async def my_bets(self, interaction: discord.Interaction) -> None:
+        rows = await self.bot.db.open_bets_for(interaction.user.id)
+        unit = Economy.UNIT
+
+        if not rows:
+            await interaction.response.send_message(
+                f"진행 중인 베팅이 없습니다. <#{Channels.PREDICTION}> 에서 걸어 보세요.",
+                ephemeral=True,
+            )
+            return
+
+        staked = sum(int(r["amount"]) for r in rows)
+        embed = base_embed(
+            "🎟️ 내 베팅",
+            Colors.GOLD,
+            description=f"진행 중 **{len(rows)}건** · 걸어 둔 포인트 **{staked:,}{unit}**",
+        )
+
+        for row in rows[:10]:
+            match_id = str(row["match_id"])
+            pick = str(row["pick"])
+            stake = int(row["amount"])
+            team_a, team_b = str(row["team_a"]), str(row["team_b"])
+            picked = team_a if pick == PICK_A else team_b
+
+            pool_a, pool_b, _, _ = await self.bot.db.bet_pools(match_id)
+            total = pool_a + pool_b
+            side = pool_a if pick == PICK_A else pool_b
+            start = parse_utc(str(row["start_at"]))
+            state = "베팅 중" if str(row["state"]) == STATE_OPEN else "마감 · 결과 대기"
+
+            embed.add_field(
+                name=f"{row['league']} · {team_a} vs {team_b}",
+                value=(
+                    f"**{picked}** 에 **{stake:,}{unit}** · {state}\n"
+                    f"현재 배당 {fmt_odds(payout_odds(side, total))} → 적중 시 "
+                    f"**{payout_for(stake, side, total):,}{unit}**\n"
+                    f"{discord.utils.format_dt(start, 'R')} 시작"
+                ),
+                inline=False,
+            )
+
+        if len(rows) > 10:
+            embed.set_footer(text=f"롤 같이 하자 · 최근 10건만 보여 줍니다 (총 {len(rows)}건)")
+        else:
+            embed.set_footer(text="롤 같이 하자 · 배당은 마감 시점에 확정됩니다")
+
+        await interaction.response.send_message(embed=embed, ephemeral=True)
+
+    @app_commands.command(
         name="경기추가",
         description="[관리자] 승부예측을 직접 등록합니다. (아시안게임 등)",
     )
@@ -943,6 +1081,74 @@ class PredictionCog(commands.Cog, name="Prediction"):
         await interaction.followup.send(
             f"✅ **{winner_name}** 승리로 정산했습니다. {paid}명에게 지급했습니다.",
             ephemeral=True,
+        )
+
+    @app_commands.command(
+        name="경기재정산",
+        description="[관리자] 잘못 넣은 결과를 되돌리고 다시 정산합니다.",
+    )
+    @app_commands.describe(
+        경기id="`/예측목록` 에서 확인한 ID", 승자="실제로 이긴 쪽"
+    )
+    @app_commands.choices(
+        승자=[
+            app_commands.Choice(name="왼쪽 팀 (팀A)", value=PICK_A),
+            app_commands.Choice(name="오른쪽 팀 (팀B)", value=PICK_B),
+        ]
+    )
+    @staff_only()
+    async def resettle(
+        self,
+        interaction: discord.Interaction,
+        경기id: str,
+        승자: app_commands.Choice[str],
+    ) -> None:
+        match_id = 경기id.strip()
+        row = await self.bot.db.get_prediction(match_id)
+        if row is None:
+            await interaction.response.send_message(
+                "그런 경기 ID 가 없습니다. `/예측목록` 으로 확인해 주세요.", ephemeral=True
+            )
+            return
+        if str(row["state"]) != STATE_RESOLVED:
+            await interaction.response.send_message(
+                "아직 정산되지 않은 경기입니다. `/경기결과` 를 쓰세요.", ephemeral=True
+            )
+            return
+        if str(row["winner"] or "") == 승자.value:
+            await interaction.response.send_message(
+                "이미 그 팀의 승리로 정산돼 있습니다.", ephemeral=True
+            )
+            return
+
+        await interaction.response.defer(ephemeral=True)
+
+        before_winner = str(row["team_a"]) if row["winner"] == PICK_A else str(row["team_b"])
+        undone, shortfall = await self._unwind(row)
+
+        fresh = await self.bot.db.get_prediction(match_id)
+        paid = await self.resolve(fresh, 승자.value)
+        winner_name = (
+            str(row["team_a"]) if 승자.value == PICK_A else str(row["team_b"])
+        )
+
+        message = (
+            f"✅ **{before_winner}** → **{winner_name}** 승리로 다시 정산했습니다.\n"
+            f"· 이전 지급 회수: {undone}명\n"
+            f"· 새로 지급: {paid}명"
+        )
+        if shortfall:
+            # 받은 포인트를 이미 써 버린 사람이 있으면 전부 걷지 못한다
+            message += (
+                f"\n\n⚠️ **{shortfall:,}{Economy.UNIT}** 는 회수하지 못했습니다. "
+                "이미 쓴 사람이 있어 잔액이 0 에서 멈췄습니다. "
+                "필요하면 `/포인트차감` 으로 직접 맞춰 주세요."
+            )
+        await interaction.followup.send(message, ephemeral=True)
+
+        log.info(
+            "승부예측 재정산: %s (%s → %s) · 회수 %d명 · 지급 %d명 · 미회수 %d",
+            match_id, before_winner, winner_name, undone, paid, shortfall,
         )
 
     @app_commands.command(
