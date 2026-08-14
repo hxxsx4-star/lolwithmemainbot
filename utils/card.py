@@ -537,6 +537,7 @@ def render_profile_card(
     flex_record: str,
     theme: Theme = DEFAULT_CARD_THEME,
     slogan: str = PROFILE_SLOGAN,
+    prediction_record: str = "",
 ) -> io.BytesIO:
     """프로필 카드를 그려 PNG 바이트로 돌려준다.
 
@@ -573,13 +574,29 @@ def render_profile_card(
         fill=CREAM,
     )
 
+    # 승부예측 전적은 롤 계정과 같은 줄의 오른쪽 끝에 붙인다. 세로 배치를
+    # 건드리지 않으려고 비어 있던 가로 공간을 쓰는 것이다. 그만큼 왼쪽
+    # 문구가 쓸 수 있는 폭은 줄여 줘야 서로 겹치지 않는다.
+    sub_max_w = name_max_w
+    if prediction_record:
+        rec_font = _font(17, bold=False)
+        rec_w = draw.textlength(prediction_record, font=rec_font)
+        draw.text(
+            (points_box_x - 28, EDGE + 84),
+            prediction_record,
+            font=rec_font,
+            fill=MUTED_WARM,
+            anchor="ra",
+        )
+        sub_max_w = max(80, name_max_w - int(rec_w) - 24)
+
     # 등록한 사람은 롤 계정을, 아직이면 시안의 영문 문구를 보여준다.
     # 자간 벌리기는 영문 문구에만 어울리므로 롤 계정은 그냥 쓴다.
     if riot_id:
         riot_font = _font(18)
         draw.text(
             (text_x, EDGE + 82),
-            _fit(draw, riot_id, riot_font, name_max_w),
+            _fit(draw, riot_id, riot_font, sub_max_w),
             font=riot_font,
             fill=theme.accent_bright,
         )
@@ -588,7 +605,7 @@ def render_profile_card(
         _tracked_text(
             draw,
             (text_x, EDGE + 84),
-            _fit(draw, PROFILE_SUBTITLE, sub_font, name_max_w),
+            _fit(draw, PROFILE_SUBTITLE, sub_font, sub_max_w),
             sub_font,
             MUTED,
             spacing=2.4,

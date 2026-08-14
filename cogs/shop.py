@@ -319,6 +319,7 @@ class ShopCog(commands.Cog, name="Shop"):
         name="색상역할생성",
         description="[관리자] 역할상점에서 팔 색상 역할을 만듭니다.",
     )
+    @app_commands.default_permissions(manage_guild=True)
     @staff_only()
     async def create_color_roles(self, interaction: discord.Interaction) -> None:
         specs = {key: CARD_THEMES[key] for key in SHOP_THEME_KEYS}
@@ -328,6 +329,7 @@ class ShopCog(commands.Cog, name="Shop"):
         name="응원역할생성",
         description="[관리자] 역할상점에서 팔 LCK 팀 응원 역할을 만듭니다.",
     )
+    @app_commands.default_permissions(manage_guild=True)
     @staff_only()
     async def create_team_roles(self, interaction: discord.Interaction) -> None:
         await self._ensure_roles(interaction, KIND_TEAM_ROLE, dict(LCK_TEAMS))
@@ -336,6 +338,7 @@ class ShopCog(commands.Cog, name="Shop"):
         name="챔피언역할생성",
         description="[관리자] 챔피언상점에서 팔 챔피언 역할 60종을 만듭니다.",
     )
+    @app_commands.default_permissions(manage_guild=True)
     @staff_only()
     async def create_champion_roles(self, interaction: discord.Interaction) -> None:
         # 60개를 한 번에 만들면 레이트 리밋에 걸려 몇 분 걸릴 수 있다.

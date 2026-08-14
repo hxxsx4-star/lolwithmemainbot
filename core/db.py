@@ -377,6 +377,58 @@ class Database:
         await self.conn.commit()
         return balance
 
+    async def economy_totals(self) -> dict[str, int]:
+        """지금 돌고 있는 포인트의 총량과 보유자 수."""
+        row = await self._fetchone(
+            "SELECT COALESCE(SUM(points), 0) AS total,"
+            " COUNT(*) AS holders,"
+            " COALESCE(MAX(points), 0) AS top"
+            " FROM users WHERE points > 0"
+        )
+        if row is None:
+            return {"total": 0, "holders": 0, "top": 0}
+        return {
+            "total": int(row["total"]),
+            "holders": int(row["holders"]),
+            "top": int(row["top"]),
+        }
+
+    async def point_flow(self, since_iso: str) -> tuple[int, int]:
+        """그 시각 이후 (발행량, 소각량). 소각량은 양수로 돌려준다.
+
+        발행은 출석 · 음성 적립처럼 새로 생긴 포인트고, 소각은 상점 구매나
+        베팅처럼 빠져나간 포인트다. 승부예측은 걸 때 빠지고 정산 때 돌아오니
+        둘 다에 잡힌다.
+        """
+        row = await self._fetchone(
+            "SELECT COALESCE(SUM(CASE WHEN delta > 0 THEN delta END), 0) AS minted,"
+            " COALESCE(SUM(CASE WHEN delta < 0 THEN -delta END), 0) AS burned"
+            " FROM point_log WHERE created_at >= ?",
+            (since_iso,),
+        )
+        if row is None:
+            return 0, 0
+        return int(row["minted"]), int(row["burned"])
+
+    async def point_flow_by_reason(
+        self, since_iso: str, limit: int = 8
+    ) -> list[aiosqlite.Row]:
+        """무엇 때문에 포인트가 오갔는지. 사유 앞부분으로 묶는다.
+
+        사유에는 "승부예측 적중 — LCK T1 vs GEN" 처럼 경기 이름이 붙어서
+        그대로 묶으면 종류마다 흩어진다. 그래서 `—` 앞만 잘라 묶는다.
+        """
+        return await self._fetchall(
+            "SELECT TRIM(CASE WHEN INSTR(reason, '—') > 0"
+            "   THEN SUBSTR(reason, 1, INSTR(reason, '—') - 1)"
+            "   ELSE reason END) AS label,"
+            " COUNT(*) AS n,"
+            " COALESCE(SUM(delta), 0) AS net"
+            " FROM point_log WHERE created_at >= ?"
+            " GROUP BY label ORDER BY ABS(SUM(delta)) DESC LIMIT ?",
+            (since_iso, limit),
+        )
+
     async def get_points(self, user_id: int) -> int:
         row = await self._fetchone("SELECT points FROM users WHERE user_id = ?", (user_id,))
         return int(row["points"]) if row else 0
@@ -710,6 +762,9 @@ class Database:
 
     async def get_panel(self, key: str) -> Optional[aiosqlite.Row]:
         return await self._fetchone("SELECT * FROM panels WHERE key = ?", (key,))
+
+    async def all_panels(self) -> list[aiosqlite.Row]:
+        return await self._fetchall("SELECT * FROM panels ORDER BY key")
 
     async def panel_key_of(self, message_id: int) -> Optional[str]:
         """이 메시지가 역할 선택 패널이라면 그 종류를 돌려준다."""

@@ -169,6 +169,7 @@ class ReactionRoles(commands.Cog, name="ReactionRoles"):
             app_commands.Choice(name="게임 모드", value="game_mode"),
         ]
     )
+    @app_commands.default_permissions(manage_guild=True)
     @staff_only()
     async def create_panels(
         self,

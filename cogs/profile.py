@@ -126,6 +126,14 @@ class Profile(commands.Cog, name="Profile"):
 
         theme, slogan = await self._cosmetics(target.id)
 
+        # 승부예측 전적. 아직 결과가 나온 예측이 없으면 빈 줄로 두어 카드가
+        # 괜히 허전해 보이지 않게 한다
+        correct, played, profit = await self.bot.db.prediction_stats(target.id)
+        prediction_record = ""
+        if played:
+            sign = "+" if profit >= 0 else ""
+            prediction_record = f"예측 {correct}/{played} · {sign}{profit:,}P"
+
         try:
             avatar_bytes = await target.display_avatar.replace(
                 format="png", size=256
@@ -155,6 +163,7 @@ class Profile(commands.Cog, name="Profile"):
             flex_record=flex_record,
             theme=theme,
             slogan=slogan,
+            prediction_record=prediction_record,
         )
 
         file = discord.File(buffer, filename=f"profile_{target.id}.png")

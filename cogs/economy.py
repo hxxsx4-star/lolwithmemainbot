@@ -6,6 +6,7 @@
 """
 from __future__ import annotations
 
+import datetime as dt
 import logging
 from collections import defaultdict
 
@@ -15,6 +16,7 @@ from discord.ext import commands, tasks
 
 from config import Channels, Colors, Economy, GUILD_ID, Level
 from core.checks import staff_only
+from core.db import now
 from utils.logs import base_embed, send_log, truncate, user_field
 
 log = logging.getLogger("mainbot.economy")
@@ -218,6 +220,70 @@ class Economy_(commands.Cog, name="Economy"):
         )
         await interaction.response.send_message(embed=embed)
 
+    @app_commands.command(
+        name="경제통계", description="[관리자] 포인트가 얼마나 돌고 있는지 봅니다."
+    )
+    @app_commands.describe(기간="며칠치를 볼지 (기본 7일)")
+    @app_commands.default_permissions(manage_guild=True)
+    @staff_only()
+    async def economy_stats(
+        self, interaction: discord.Interaction, 기간: int = 7
+    ) -> None:
+        days = max(1, min(90, 기간))
+        since = now() - dt.timedelta(days=days)
+        since_iso = since.isoformat(timespec="seconds")
+        unit = Economy.UNIT
+
+        totals = await self.bot.db.economy_totals()
+        minted, burned = await self.bot.db.point_flow(since_iso)
+        reasons = await self.bot.db.point_flow_by_reason(since_iso)
+
+        net = minted - burned
+        sign = "+" if net >= 0 else ""
+        embed = base_embed(
+            "📊 포인트 경제",
+            Colors.GOLD,
+            description=f"최근 **{days}일** 기준",
+        )
+        embed.add_field(
+            name="지금 돌고 있는 포인트",
+            value=(
+                f"**{totals['total']:,}{unit}**\n"
+                f"보유자 {totals['holders']:,}명 · 최고 {totals['top']:,}{unit}"
+            ),
+            inline=True,
+        )
+        embed.add_field(
+            name=f"{days}일간 오간 양",
+            value=(
+                f"발행 **+{minted:,}{unit}**\n"
+                f"소각 **-{burned:,}{unit}**\n"
+                f"순증 **{sign}{net:,}{unit}**"
+            ),
+            inline=True,
+        )
+        if totals["holders"]:
+            embed.add_field(
+                name="1인 평균",
+                value=f"{totals['total'] // totals['holders']:,}{unit}",
+                inline=True,
+            )
+
+        if reasons:
+            lines = []
+            for row in reasons:
+                value = int(row["net"])
+                mark = "+" if value >= 0 else ""
+                lines.append(
+                    f"`{mark}{value:>9,}` {str(row['label'])[:22]} ({int(row['n'])}건)"
+                )
+            embed.add_field(name="사유별", value="\n".join(lines)[:1024], inline=False)
+
+        embed.set_footer(
+            text="롤 같이 하자 · 승부예측은 걸 때 소각, 정산 때 발행으로 잡힙니다"
+        )
+        await interaction.response.send_message(embed=embed, ephemeral=True)
+
     @app_commands.command(name="랭킹", description="포인트 상위 10명을 봅니다.")
     async def ranking(self, interaction: discord.Interaction) -> None:
         rows = await self.bot.db.top_points(10)
@@ -244,6 +310,7 @@ class Economy_(commands.Cog, name="Economy"):
 
     @app_commands.command(name="포인트지급", description="[관리자] 유저에게 포인트를 지급합니다.")
     @app_commands.describe(유저="지급할 대상", 포인트="지급할 포인트", 사유="지급 사유")
+    @app_commands.default_permissions(manage_guild=True)
     @staff_only()
     async def give_points(
         self,
@@ -256,6 +323,7 @@ class Economy_(commands.Cog, name="Economy"):
 
     @app_commands.command(name="포인트차감", description="[관리자] 유저의 포인트를 차감합니다.")
     @app_commands.describe(유저="차감할 대상", 포인트="차감할 포인트", 사유="차감 사유")
+    @app_commands.default_permissions(manage_guild=True)
     @staff_only()
     async def take_points(
         self,

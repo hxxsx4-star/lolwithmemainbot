@@ -104,6 +104,7 @@ class RiotRegister(commands.Cog, name="RiotRegister"):
 
     @app_commands.command(name="등록해제", description="[관리자] 유저의 롤 계정 등록을 해제합니다.")
     @app_commands.describe(유저="등록을 해제할 대상", 사유="해제 사유")
+    @app_commands.default_permissions(manage_guild=True)
     async def unregister(
         self,
         interaction: discord.Interaction,

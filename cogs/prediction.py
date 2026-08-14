@@ -982,6 +982,7 @@ class PredictionCog(commands.Cog, name="Prediction"):
         판수="BO 뒤에 붙는 숫자 (기본 3)",
         라운드="예: 8강 (선택)",
     )
+    @app_commands.default_permissions(manage_guild=True)
     @staff_only()
     async def add_match(
         self,
@@ -1054,6 +1055,7 @@ class PredictionCog(commands.Cog, name="Prediction"):
             app_commands.Choice(name="오른쪽 팀 (팀B)", value=PICK_B),
         ]
     )
+    @app_commands.default_permissions(manage_guild=True)
     @staff_only()
     async def set_result(
         self,
@@ -1096,6 +1098,7 @@ class PredictionCog(commands.Cog, name="Prediction"):
             app_commands.Choice(name="오른쪽 팀 (팀B)", value=PICK_B),
         ]
     )
+    @app_commands.default_permissions(manage_guild=True)
     @staff_only()
     async def resettle(
         self,
@@ -1155,6 +1158,7 @@ class PredictionCog(commands.Cog, name="Prediction"):
         name="경기취소", description="[관리자] 예측을 취소합니다. (포인트 지급 없음)"
     )
     @app_commands.describe(경기id="`/예측목록` 에서 확인한 ID")
+    @app_commands.default_permissions(manage_guild=True)
     @staff_only()
     async def cancel_match(self, interaction: discord.Interaction, 경기id: str) -> None:
         match_id = 경기id.strip()
@@ -1194,6 +1198,7 @@ class PredictionCog(commands.Cog, name="Prediction"):
     @app_commands.command(
         name="예측목록", description="[관리자] 진행 중인 예측과 경기 ID를 봅니다."
     )
+    @app_commands.default_permissions(manage_guild=True)
     @staff_only()
     async def list_matches(self, interaction: discord.Interaction) -> None:
         rows = await self.bot.db.predictions_in_states([STATE_OPEN, STATE_CLOSED])
@@ -1226,6 +1231,7 @@ class PredictionCog(commands.Cog, name="Prediction"):
         name="리그목록",
         description="[관리자] 일정 서버가 주는 대회 목록과 자동 등록 대상을 확인합니다.",
     )
+    @app_commands.default_permissions(manage_guild=True)
     @staff_only()
     async def list_leagues(self, interaction: discord.Interaction) -> None:
         await interaction.response.defer(ephemeral=True)

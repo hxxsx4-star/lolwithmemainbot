@@ -159,6 +159,7 @@ class Backup(commands.Cog, name="Backup"):
     # ------------------------------------------------------------ 수동 실행
 
     @app_commands.command(name="백업", description="[관리자] 지금 바로 데이터 백업을 실행합니다.")
+    @app_commands.default_permissions(manage_guild=True)
     @staff_only()
     async def manual_backup(self, interaction: discord.Interaction) -> None:
         await interaction.response.defer(ephemeral=True)

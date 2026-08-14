@@ -166,6 +166,7 @@ class TicketCog(commands.Cog, name="Ticket"):
 
     @app_commands.command(name="문의함생성", description="[관리자] 문의함 버튼 패널을 올립니다.")
     @app_commands.describe(채널="패널을 올릴 채널 (비우면 기본 문의함 채널)")
+    @app_commands.default_permissions(manage_guild=True)
     @staff_only()
     async def post_panel(
         self,

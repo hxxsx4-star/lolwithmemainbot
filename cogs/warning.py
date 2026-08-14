@@ -29,6 +29,7 @@ class WarningCog(commands.Cog, name="Warning"):
 
     @app_commands.command(name="경고", description="유저에게 경고를 지급합니다.")
     @app_commands.describe(유저="경고를 줄 대상", 횟수="지급할 경고 횟수", 사유="경고 사유")
+    @app_commands.default_permissions(ban_members=True)
     @moderator_only()
     async def warn(
         self,
@@ -159,6 +160,7 @@ class WarningCog(commands.Cog, name="Warning"):
 
     @app_commands.command(name="차감", description="유저의 경고를 차감합니다.")
     @app_commands.describe(유저="경고를 뺄 대상", 횟수="차감할 경고 횟수", 사유="차감 사유")
+    @app_commands.default_permissions(ban_members=True)
     @moderator_only()
     async def unwarn(
         self,

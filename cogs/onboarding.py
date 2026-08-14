@@ -418,6 +418,7 @@ class Onboarding(commands.Cog, name="Onboarding"):
         name="역할동기화",
         description="[관리자] 봇을 제외한 전원에게 기본 역할을 채우고 미등록 역할을 정리합니다.",
     )
+    @app_commands.default_permissions(manage_guild=True)
     @staff_only()
     async def sync_unregistered(self, interaction: discord.Interaction) -> None:
         guild = interaction.guild
@@ -481,6 +482,7 @@ class Onboarding(commands.Cog, name="Onboarding"):
         name="인증안내",
         description="[관리자] 소개 채널에 인증 안내를 지금 바로 올립니다.",
     )
+    @app_commands.default_permissions(manage_guild=True)
     @staff_only()
     async def send_reminder(self, interaction: discord.Interaction) -> None:
         guild = interaction.guild

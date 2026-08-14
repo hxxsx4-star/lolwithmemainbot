@@ -17,10 +17,14 @@ from __future__ import annotations
 import datetime as dt
 import logging
 
+import discord
+from discord import app_commands
 from discord.ext import commands, tasks
 
-from config import Channels, Colors, Economy, TIMEZONE, Watchdog as Config
+from config import Channels, Colors, Economy, Roles, TIMEZONE, Watchdog as Config
+from core.checks import staff_only
 from utils.logs import base_embed, send_log
+from utils.roles import role_problem
 
 log = logging.getLogger("mainbot.watchdog")
 
@@ -200,6 +204,154 @@ class WatchdogCog(commands.Cog, name="Watchdog"):
         embed.set_footer(text=f"롤 같이 하자 · {Config.REPEAT_HOURS}시간에 한 번만 알립니다")
         await send_log(self.bot, Channels.STAFF_ALERT, embed)
         log.warning("정산 누락 %d건 · 묶인 포인트 %d", len(rows), locked)
+
+
+    # -------------------------------------------------------------- 명령어
+
+    @app_commands.command(
+        name="점검", description="[관리자] 봇이 제대로 동작할 수 있는 상태인지 확인합니다."
+    )
+    @app_commands.default_permissions(manage_guild=True)
+    @staff_only()
+    async def diagnose(self, interaction: discord.Interaction) -> None:
+        guild = interaction.guild
+        if guild is None:
+            return
+        await interaction.response.defer(ephemeral=True)
+
+        problems: list[str] = []
+        lines: list[str] = []
+
+        # 1) 역할 — 지급하려면 봇 역할보다 아래에 있어야 한다
+        wanted: dict[str, int] = {
+            "미등록": Roles.UNREGISTERED,
+            "서버원": Roles.MEMBER,
+            "내전 개설": Roles.SCRIM_HOST,
+        }
+        for lane, role_id in Roles.MAIN_LANES.items():
+            wanted[f"주 라인 {lane}"] = role_id
+        for lane, role_id in Roles.SUB_LANES.items():
+            wanted[f"부 라인 {lane}"] = role_id
+        for mode, role_id in Roles.GAME_MODES.items():
+            wanted[f"모드 {mode}"] = role_id
+
+        # 상점 역할은 DB 에 담긴 매핑을 그대로 본다
+        shop_total = 0
+        for setting in ("shop_color_roles", "shop_team_roles", "shop_champion_roles"):
+            mapping = await self.bot.db.get_json_setting(setting) or {}
+            shop_total += len(mapping)
+            for key, role_id in mapping.items():
+                wanted[f"{setting}:{key}"] = int(role_id)
+
+        broken = [
+            (label, issue)
+            for label, role_id in wanted.items()
+            if (issue := role_problem(guild, role_id)) is not None
+        ]
+        if broken:
+            problems.append(f"역할 {len(broken)}개에 문제가 있습니다")
+            sample = "\n".join(
+                f"· {label} — {discord.utils.remove_markdown(issue)[:70]}"
+                for label, issue in broken[:5]
+            )
+            lines.append(f"❌ **역할 {len(broken)}/{len(wanted)}개 문제**\n{sample}")
+            if len(broken) > 5:
+                lines.append(f"　…외 {len(broken) - 5}개")
+        else:
+            lines.append(
+                f"✅ **역할 {len(wanted)}개 정상** (상점 {shop_total}종 포함)"
+            )
+
+        # 2) 채널 — 있는지, 봇이 글을 쓸 수 있는지
+        bad_channels = []
+        channels = {
+            name: value
+            for name, value in vars(Channels).items()
+            if isinstance(value, int) and not name.startswith("_")
+        }
+        for name, channel_id in channels.items():
+            channel = guild.get_channel(channel_id)
+            if channel is None:
+                bad_channels.append(f"· {name} — 채널을 찾을 수 없음")
+                continue
+            perms = channel.permissions_for(guild.me)
+            if not perms.view_channel:
+                bad_channels.append(f"· {name} — 볼 수 없음")
+            elif not perms.send_messages:
+                bad_channels.append(f"· {name} — 글을 쓸 수 없음")
+        if bad_channels:
+            problems.append(f"채널 {len(bad_channels)}개에 문제가 있습니다")
+            lines.append(
+                f"❌ **채널 {len(bad_channels)}/{len(channels)}개 문제**\n"
+                + "\n".join(bad_channels[:5])
+            )
+        else:
+            lines.append(f"✅ **채널 {len(channels)}개 정상**")
+
+        # 3) 패널 메시지 — 지워졌으면 반응을 받을 수 없다
+        panels = await self.bot.db.all_panels()
+        dead = []
+        for panel in panels:
+            channel = guild.get_channel(int(panel["channel_id"]))
+            if channel is None:
+                dead.append(str(panel["key"]))
+                continue
+            try:
+                await channel.fetch_message(int(panel["message_id"]))
+            except discord.HTTPException:
+                dead.append(str(panel["key"]))
+        if dead:
+            problems.append(f"패널 {len(dead)}개가 사라졌습니다")
+            lines.append(
+                f"❌ **패널 {len(dead)}/{len(panels)}개 없음** — {', '.join(dead)}\n"
+                "　`/역할패널생성` 으로 다시 올려 주세요"
+            )
+        elif panels:
+            lines.append(f"✅ **패널 {len(panels)}개 살아 있음**")
+
+        # 4) 승부예측 자동 등록이 최근에 돌았는지
+        since = dt.datetime.now(dt.timezone.utc) - dt.timedelta(
+            days=Config.STALE_REGISTER_DAYS
+        )
+        recent = await self.bot.db.predictions_created_since(since.isoformat())
+        if recent:
+            lines.append(
+                f"✅ **승부예측 자동 등록 정상** "
+                f"(최근 {Config.STALE_REGISTER_DAYS}일 {recent}건)"
+            )
+        else:
+            problems.append("승부예측이 며칠째 안 올라왔습니다")
+            lines.append(
+                f"⚠️ **최근 {Config.STALE_REGISTER_DAYS}일간 등록 0건**\n"
+                "　비시즌이면 정상입니다. 아니면 `/리그목록` 을 확인해 주세요"
+            )
+
+        # 5) 정산이 밀린 경기
+        cutoff = dt.datetime.now(dt.timezone.utc) - dt.timedelta(
+            hours=Config.STALE_SETTLE_HOURS
+        )
+        stale = await self.bot.db.stale_predictions(cutoff.isoformat())
+        if stale:
+            locked = sum(int(r["pool"]) for r in stale)
+            problems.append(f"정산 안 된 경기 {len(stale)}건")
+            lines.append(
+                f"⚠️ **정산 대기 {len(stale)}건 · 묶인 포인트 "
+                f"{locked:,}{Economy.UNIT}**\n"
+                "　`/예측목록` 에서 확인 후 `/경기결과` 또는 `/경기취소`"
+            )
+        else:
+            lines.append("✅ **밀린 정산 없음**")
+
+        embed = base_embed(
+            "🩺 봇 상태 점검",
+            Colors.DANGER if problems else Colors.SUCCESS,
+            description=(
+                "문제 " + " · ".join(problems) if problems else "모두 정상입니다."
+            ),
+        )
+        embed.add_field(name="결과", value="\n\n".join(lines)[:1024], inline=False)
+        embed.set_footer(text="롤 같이 하자 · 조용히 깨지는 것들을 한 번에 확인합니다")
+        await interaction.followup.send(embed=embed, ephemeral=True)
 
 
 async def setup(bot: commands.Bot) -> None:
