@@ -12,6 +12,9 @@ from config import RIOT_ACCOUNT_REGION, RIOT_API_KEY, RIOT_PLATFORM
 log = logging.getLogger("mainbot.riot")
 
 ACCOUNT_URL = "https://{region}.api.riotgames.com/riot/account/v1/accounts/by-riot-id/{name}/{tag}"
+ACCOUNT_BY_PUUID_URL = (
+    "https://{region}.api.riotgames.com/riot/account/v1/accounts/by-puuid/{puuid}"
+)
 LEAGUE_URL = "https://{platform}.api.riotgames.com/lol/league/v4/entries/by-puuid/{puuid}"
 
 # 라이엇 티어 문자열 → 서버에서 쓰는 약자
@@ -174,6 +177,22 @@ class RiotClient:
             puuid=data["puuid"],
             game_name=data.get("gameName", game_name),
             tag_line=data.get("tagLine", tag_line),
+        )
+
+    async def fetch_account_by_puuid(self, puuid: str) -> Optional[RiotAccount]:
+        """PUUID 로 **지금** 쓰고 있는 닉네임#태그를 받아온다.
+
+        롤 닉네임은 바뀌지만 PUUID 는 안 바뀐다. 등록할 때 적어 둔 이름을
+        그대로 두면 닉을 바꾼 사람은 프로필에 옛 이름이 계속 남는다.
+        """
+        url = ACCOUNT_BY_PUUID_URL.format(region=RIOT_ACCOUNT_REGION, puuid=puuid)
+        data = await self._get(url)
+        if not isinstance(data, dict) or not data.get("gameName"):
+            return None
+        return RiotAccount(
+            puuid=data.get("puuid", puuid),
+            game_name=data["gameName"],
+            tag_line=data.get("tagLine", ""),
         )
 
     async def fetch_ranks(self, puuid: str) -> dict[str, Optional[RankEntry]]:

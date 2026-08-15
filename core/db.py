@@ -572,6 +572,22 @@ class Database:
 
     # -------------------------------------------------------- 롤 계정 등록
 
+    async def update_riot_name(
+        self, user_id: int, game_name: str, tag_line: str
+    ) -> bool:
+        """롤 닉네임이 바뀌었을 때 표시 이름만 따라가게 한다.
+
+        같은 계정(PUUID 가 그대로)이므로 등록 시각이나 랭크 캐시는 건드리지
+        않는다. 실제로 바뀐 경우에만 True 를 돌려준다.
+        """
+        changed = await self._exec_count(
+            "UPDATE users SET riot_game_name = ?, riot_tag_line = ?"
+            " WHERE user_id = ?"
+            "   AND (riot_game_name IS NOT ? OR riot_tag_line IS NOT ?)",
+            (game_name, tag_line, user_id, game_name, tag_line),
+        )
+        return bool(changed)
+
     async def set_riot_account(
         self,
         user_id: int,

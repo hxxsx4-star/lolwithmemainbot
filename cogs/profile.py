@@ -18,7 +18,7 @@ from config import (
 )
 from utils.card import Theme, render_profile_card, theme_from_spec
 from utils.parsing import FormatError, parse_profile_format
-from utils.riot import RankEntry
+from utils.riot import RankEntry, RiotError
 from utils.roles import tier_of
 
 log = logging.getLogger("mainbot.profile")
@@ -48,6 +48,10 @@ class Profile(commands.Cog, name="Profile"):
         if not self.bot.riot.enabled:
             return None, None
 
+        # 랭크를 받으러 가는 김에 닉네임도 맞춘다. 롤 닉은 바뀌어도 PUUID 는
+        # 그대로여서, 등록할 때 적어 둔 이름을 놔두면 옛 이름이 계속 남는다.
+        await self._refresh_riot_name(user)
+
         found = await self.bot.riot.fetch_ranks(user.riot_puuid)
         solo, flex = found["solo"], found["flex"]
         await self.bot.db.set_riot_ranks(
@@ -56,6 +60,31 @@ class Profile(commands.Cog, name="Profile"):
             flex.to_dict() if flex else None,
         )
         return solo, flex
+
+    async def _refresh_riot_name(self, user) -> None:
+        """등록된 계정의 현재 닉네임을 받아와 바뀌었으면 고친다.
+
+        실패해도 프로필 카드는 그려야 하므로 조용히 넘어간다. 이름이 조금
+        옛것인 건 카드를 아예 못 보는 것보다 낫다.
+        """
+        try:
+            account = await self.bot.riot.fetch_account_by_puuid(user.riot_puuid)
+        except RiotError as exc:
+            log.debug("닉네임 갱신 실패 (%s): %s", user.user_id, exc)
+            return
+        if account is None:
+            return
+
+        if await self.bot.db.update_riot_name(
+            user.user_id, account.game_name, account.tag_line
+        ):
+            log.info(
+                "롤 닉네임 변경 반영: %s → %s#%s",
+                user.riot_id, account.game_name, account.tag_line,
+            )
+            # 이번 카드에도 바로 반영되도록 손에 든 값을 고쳐 둔다
+            user.riot_game_name = account.game_name
+            user.riot_tag_line = account.tag_line
 
     async def _cosmetics(self, user_id: int) -> tuple[Theme, str]:
         """상점에서 산 테마와 문구. 없거나 만료됐으면 기본값."""
