@@ -264,7 +264,8 @@ class TicketCog(commands.Cog, name="Ticket"):
             description=(
                 f"{interaction.user.mention} 님의 문의가 접수되었습니다.\n\n"
                 f"{kind.prompt}\n\n"
-                "내용을 남겨 주시면 스태프가 확인 후 답변드립니다."
+                "내용을 남겨 주시면 스태프가 확인 후 답변드립니다.\n"
+                "-# 문의를 닫는 것은 스태프가 합니다. 볼일이 끝나셨으면 알려 주세요."
             ),
         )
         embed.add_field(name="문의자", value=f"{interaction.user.mention}", inline=True)
@@ -301,11 +302,14 @@ class TicketCog(commands.Cog, name="Ticket"):
 
         member = interaction.user
         opener_id = int(ticket["user_id"])
-        if member.id != opener_id and not (
-            isinstance(member, discord.Member) and is_staff(member)
-        ):
+        # 문의자 본인은 닫을 수 없다. 답변을 받기 전에 실수로 닫아 버리면
+        # 채널이 잠겨 이어서 물어볼 수 없게 되고, 스태프도 처리가 끝났는지
+        # 아닌지 알 수 없다. 닫는 판단은 스태프가 한다.
+        if not (isinstance(member, discord.Member) and is_staff(member)):
             await interaction.response.send_message(
-                "문의자 본인 또는 스태프만 닫을 수 있습니다.", ephemeral=True
+                "문의는 **스태프만** 닫을 수 있습니다.\n"
+                "볼일이 끝나셨으면 채팅으로 알려 주시면 스태프가 닫아 드립니다.",
+                ephemeral=True,
             )
             return
 
