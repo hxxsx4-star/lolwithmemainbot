@@ -25,6 +25,7 @@ from config import (
     LANE_EMOJIS,
     LANE_NAMES,
     Roles,
+    Warning as WarnConfig,
 )
 from core.checks import staff_only
 from utils.logs import base_embed
@@ -66,6 +67,11 @@ class RolePanel:
     color: int
     options: tuple[RoleOption, ...]
     exclusive: bool  # True 면 패널 안에서 하나만 고를 수 있다
+
+    # 라인·모드 패널은 `/역할패널생성` 이 한꺼번에 올리지만, 내전 규칙처럼
+    # 본문이 따로 있는 패널은 자기 명령어로 올린다. 그런 패널은 여기서
+    # 제외해야 `/역할패널생성 전체` 가 엉뚱한 모양으로 덮어쓰지 않는다.
+    standalone: bool = False
 
     def by_emoji(self, key: str) -> RoleOption | None:
         for option in self.options:
@@ -129,7 +135,97 @@ PANELS: dict[str, RolePanel] = {
         ),
         exclusive=False,
     ),
+    "scrim_rules": RolePanel(
+        key="scrim_rules",
+        title="⚔️ 내전 참가 규칙",
+        description="규칙에 동의하면 내전 역할을 받습니다.",
+        color=Colors.GOLD,
+        options=(
+            RoleOption("agree", "내전 참가", "✅", Roles.SCRIM_MEMBER),
+        ),
+        exclusive=False,
+        standalone=True,
+    ),
 }
+
+
+def scrim_rules_embed() -> discord.Embed:
+    """내전 참가 규칙.
+
+    적는 내용은 **이 봇이 실제로 하는 것**에 맞춘다. 없는 기능을 규칙에
+    적어 두면 서버원이 기대했다가 안 돼서 문의가 늘어난다.
+    """
+    embed = base_embed(
+        "⚔️ 내전 참가 규칙",
+        Colors.GOLD,
+        description="내전에 참여하기 전에 아래 내용을 꼭 읽어 주세요.",
+    )
+    embed.add_field(
+        name="📋 참가 방법",
+        value=(
+            f"<@&{Roles.SCRIM_HOST}> 가 `/내전생성` 으로 모집 글을 올리면 "
+            f"<#{Channels.SCRIM_FORUM}> 에 글이 생깁니다.\n"
+            "글에 붙은 **참가 버튼**을 누르면 참가자 목록에 들어갑니다. "
+            "**10명(5대5)** 이 모이면 팀을 나눕니다."
+        ),
+        inline=False,
+    )
+    embed.add_field(
+        name="🪪 계정 인증은 필수",
+        value=(
+            "참가자 목록에는 `/등록` 으로 연결한 **롤 닉네임#태그**가 표시됩니다.\n"
+            "등록을 안 하면 `(등록 정보 없음)` 으로 뜨니 미리 해 주세요.\n"
+            "· 인증된 **본인 계정으로만** 참여할 수 있습니다\n"
+            "· 계정 공유 · 대리 · 타인 계정 사용은 금지입니다"
+        ),
+        inline=False,
+    )
+    embed.add_field(
+        name="🎮 진행 방식",
+        value=(
+            "· **하드 피어리스** — 한 번 나온 챔피언은 시리즈 내내 양 팀 모두 다시 못 씁니다\n"
+            "· **피어리스 없음** — 챔피언 제한 없이 매 판 자유롭게 픽합니다\n"
+            "· 판수는 3판 2선 · 5판 3선 · 죽을 때까지 중에서 정합니다\n"
+            "· 같은 팀 안에서 **동일 챔피언 중복 선택은 불가**합니다"
+        ),
+        inline=False,
+    )
+    embed.add_field(
+        name="📌 지켜 주세요",
+        value=(
+            "**1. 매너는 기본** — 욕설 · 정치질 · 비난 · 남탓 금지. 실수는 웃고 넘겨 주세요\n"
+            "**2. 오더 존중** — 게임 중 오더는 최대한 따라 주시고, 의견은 정중하게\n"
+            "**3. 트롤 금지** — 고의 트롤 · 잠수 · 던지기 · 탈주 금지. 끝까지 최선을\n"
+            "**4. 팀 · 라인 변경 금지** — 설정 후 임의 변경 불가. 필요하면 관리자에게 문의\n"
+            "**5. 디스코드 참여** — 내전 중 음성 참여는 필수입니다. "
+            "듣기만 해도 되지만 웬만하면 마이크를 써 주세요\n"
+            "**6. 인장 · 감정표현 금지** — 내전 중에는 사용하지 말아 주세요\n"
+            "**7. 지각 · 잠수** — 호출 후 응답이 없으면 대기 또는 제외될 수 있습니다"
+        ),
+        inline=False,
+    )
+    embed.add_field(
+        name="⚠️ 제재",
+        value=(
+            "고의 트롤 · 무단 노쇼 · 불참 등은 **경고 대상**입니다.\n"
+            f"**경고 {WarnConfig.BAN_THRESHOLD}회 누적 시 자동으로 서버에서 차단**됩니다. "
+            "(`/경고목록` 으로 내 경고를 확인할 수 있습니다)\n"
+            "내전 진행 중에는 관리진의 안내를 우선으로 따라 주세요. "
+            "규칙 위반 시 경고 없이 내전 참여가 제한될 수 있습니다."
+        ),
+        inline=False,
+    )
+    embed.add_field(
+        name="✅ 동의하기",
+        value=(
+            f"이 메시지에 **✅ 반응**을 누르면 <@&{Roles.SCRIM_MEMBER}> 역할이 "
+            "지급되어 모집에 참여할 수 있습니다.\n"
+            "-# 반응을 취소하면 역할도 함께 회수됩니다."
+        ),
+        inline=False,
+    )
+    embed.set_footer(text="롤 같이 하자 · 즐겁게 합시다")
+    return embed
 
 
 def panel_embed(panel: RolePanel) -> discord.Embed:
@@ -190,7 +286,7 @@ class ReactionRoles(commands.Cog, name="ReactionRoles"):
             return
 
         wanted = (
-            list(PANELS.values())
+            [panel for panel in PANELS.values() if not panel.standalone]
             if 종류 is None or 종류.value == "all"
             else [PANELS[종류.value]]
         )
@@ -238,6 +334,64 @@ class ReactionRoles(commands.Cog, name="ReactionRoles"):
             "✅ 역할 선택 패널을 올렸습니다.\n"
             + "\n".join(posted)
             + "\n\n같은 종류의 예전 패널이 있다면 **삭제해 주세요.** 최신 패널만 반응합니다.",
+            ephemeral=True,
+        )
+
+    # ------------------------------------------------------------ 내전 규칙
+
+    @app_commands.command(
+        name="내전규칙",
+        description="[관리자] 내전 규칙과 동의 패널을 올립니다.",
+    )
+    @app_commands.describe(채널="규칙을 올릴 채널 (비우면 내전 규칙 채널)")
+    @app_commands.default_permissions(manage_guild=True)
+    @staff_only()
+    async def post_scrim_rules(
+        self,
+        interaction: discord.Interaction,
+        채널: discord.TextChannel | None = None,
+    ) -> None:
+        guild = interaction.guild
+        if guild is None:
+            return
+
+        target = 채널 or guild.get_channel(Channels.SCRIM_RULES)
+        if not isinstance(target, discord.TextChannel):
+            await interaction.response.send_message(
+                f"내전 규칙 채널(`{Channels.SCRIM_RULES}`)을 찾을 수 없습니다.",
+                ephemeral=True,
+            )
+            return
+
+        panel = PANELS["scrim_rules"]
+        # 동의해도 역할이 안 붙으면 아무도 원인을 모른다. 미리 확인한다
+        issue = role_problem(guild, Roles.SCRIM_MEMBER)
+        if issue is not None:
+            await interaction.response.send_message(
+                f"⛔ 내전 역할을 지급할 수 없는 상태입니다.\n{issue}", ephemeral=True
+            )
+            return
+
+        await interaction.response.defer(ephemeral=True)
+
+        try:
+            message = await target.send(embed=scrim_rules_embed())
+            await message.add_reaction(panel.options[0].emoji)
+        except discord.Forbidden:
+            await interaction.followup.send(
+                f"{target.mention} 에 메시지를 보내거나 반응을 달 권한이 없습니다.",
+                ephemeral=True,
+            )
+            return
+        except discord.HTTPException as exc:
+            await interaction.followup.send(f"규칙 게시 실패: `{exc}`", ephemeral=True)
+            return
+
+        await self.bot.db.set_panel(panel.key, guild.id, target.id, message.id)
+        await interaction.followup.send(
+            f"✅ 내전 규칙을 올렸습니다. → [바로가기]({message.jump_url})\n"
+            f"✅ 반응을 누르면 <@&{Roles.SCRIM_MEMBER}> 역할이 지급됩니다.\n\n"
+            "예전 규칙 메시지가 있다면 **삭제해 주세요.** 최신 것만 반응합니다.",
             ephemeral=True,
         )
 
