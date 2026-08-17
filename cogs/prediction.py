@@ -98,6 +98,27 @@ def fmt_odds(value: float) -> str:
     return f"{value:.2f}배" if value > 0 else "—"
 
 
+def winner_side(row, match: Match) -> str | None:
+    """API 가 알려준 승자를 **저장해 둔** A/B 로 옮긴다.
+
+    일정 API 는 같은 경기라도 `teams` 배열 순서를 응답마다 바꿔서 준다.
+    등록할 때 teams[0] 이던 팀이 정산할 때 teams[1] 로 올 수 있다. 그래서
+    위치로 승자를 넘기면 순서가 뒤집힌 경기는 **승패가 정반대로 정산된다.**
+    실제로 이것 때문에 6경기 중 5경기가 반대로 정산됐다.
+
+    위치는 안 믿고 팀 이름으로 맞춘다. 어느 쪽과도 안 맞으면(팀명 변경 등)
+    엉뚱하게 정산하느니 None 을 돌려주고 사람이 보게 둔다.
+    """
+    if match.winner is None:
+        return None
+    champion = (match.team_a if match.winner == PICK_A else match.team_b).label
+    if champion == str(row["team_a"]):
+        return PICK_A
+    if champion == str(row["team_b"]):
+        return PICK_B
+    return None
+
+
 def payout_for(stake: int, side_pool: int, total_pool: int) -> int:
     """건 돈이 얼마로 돌아오는지. 내림해서 원금 합보다 커지지 않게 한다."""
     if side_pool <= 0:
@@ -862,8 +883,19 @@ class PredictionCog(commands.Cog, name="Prediction"):
             match = matches.get(str(row["match_id"]))
             if match is None or match.state != "completed":
                 continue
-            winner = match.winner
+
+            # 위치가 아니라 팀 이름으로 승자를 맞춘다 (winner_side 주석 참고)
+            winner = winner_side(row, match)
             if winner is None:
+                log.warning(
+                    "정산 보류: %s — API 승자(%s)를 저장된 %s / %s 어느 쪽과도"
+                    " 맞추지 못했습니다. `/경기결과` 로 직접 넣어 주세요.",
+                    row["match_id"],
+                    (match.team_a if match.winner == PICK_A else match.team_b).label
+                    if match.winner else "미확정",
+                    row["team_a"],
+                    row["team_b"],
+                )
                 continue
             await self.resolve(row, winner)
 
