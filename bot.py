@@ -1,8 +1,10 @@
 """롤 같이 하자 · 메인봇 진입점."""
 from __future__ import annotations
 
+import datetime as dt
 import logging
 import sys
+from typing import Optional
 
 import discord
 from discord import app_commands
@@ -59,6 +61,7 @@ class MainBot(commands.Bot):
         self.db = Database()
         self.riot = RiotClient()
         self.esports = EsportsClient()
+        self._offline_since: Optional[dt.datetime] = None
 
     async def setup_hook(self) -> None:
         await self.db.connect()
@@ -94,11 +97,53 @@ class MainBot(commands.Bot):
             log.warning(
                 "RIOT_API_KEY 가 비어 있습니다. /등록 이 실제 계정을 확인하지 않고 진행됩니다."
             )
+        await self._apply_presence()
+
+    async def _apply_presence(self) -> None:
         await self.change_presence(
             activity=discord.Activity(
                 type=discord.ActivityType.playing, name="롤 같이 하자 · /도움말"
             )
         )
+
+    # ------------------------------------------------------- 연결 상태 기록
+    #
+    # "봇이 꺼진 것 같다" 는 이야기가 반복되는데, 예전에는 다시 붙었다는
+    # 기록(RESUMED)만 남고 **언제 끊겼는지**가 없어서 몇 초짜리인지 몇 분짜리인지
+    # 알 수 없었다. 끊긴 순간을 적어 두고 다시 붙을 때 걸린 시간을 같이 남긴다.
+
+    async def on_disconnect(self) -> None:
+        if self._offline_since is None:
+            self._offline_since = dt.datetime.now(dt.timezone.utc)
+
+    def _reconnected(self, how: str) -> None:
+        if self._offline_since is None:
+            return
+        gap = (dt.datetime.now(dt.timezone.utc) - self._offline_since).total_seconds()
+        self._offline_since = None
+        # 몇 초짜리는 흔한 일이라 조용히 넘기고, 눈에 띄는 길이만 알린다
+        if gap >= 30:
+            log.warning("게이트웨이 %s — %.0f초 동안 끊겨 있었습니다", how, gap)
+        else:
+            log.info("게이트웨이 %s (%.1f초)", how, gap)
+
+    async def on_resumed(self) -> None:
+        self._reconnected("재개")
+
+    async def on_connect(self) -> None:
+        self._reconnected("재연결")
+
+    async def on_app_command_completion(
+        self,
+        interaction: discord.Interaction,
+        command: app_commands.Command | app_commands.ContextMenu,
+    ) -> None:
+        """명령어가 실제로 처리됐다는 기록.
+
+        예전에는 성공한 명령어가 아무 흔적도 남기지 않아서, "봇이 응답을
+        안 한다" 는 이야기가 나와도 정말 안 먹은 것인지 확인할 방법이 없었다.
+        """
+        log.info("명령어 %s — %s", f"/{command.name}", interaction.user)
 
     async def on_app_command_error(
         self, interaction: discord.Interaction, error: app_commands.AppCommandError
