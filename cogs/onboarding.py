@@ -262,10 +262,18 @@ class Onboarding(commands.Cog, name="Onboarding"):
         if not isinstance(message.author, discord.Member):
             return
 
-        # 관리진은 이 채널에 안내나 공지를 올린다. 그걸 양식으로 읽으면
-        # "양식을 확인해 주세요" 가 따라붙어 채널만 지저분해진다.
+        # 관리진은 이 채널에 안내나 공지를 올린다. 그걸 양식으로 읽고 오류를
+        # 붙이면 안내글마다 답장이 따라붙어 채널이 지저분해진다.
+        #
+        #   · 이미 등록을 마친 관리진 — 여기 쓰는 건 전부 안내글이므로 통째로 무시
+        #   · 아직 등록 안 한 관리진 — 양식이 맞으면 등록해 주되, 양식이 아니면
+        #     그냥 안내글로 보고 조용히 넘어간다
+        quiet = False
         if is_staff(message.author):
-            return
+            author = await self.bot.db.get_user(message.author.id)
+            if author.registered:
+                return
+            quiet = True
 
         if message.author.id in self._processing:
             return
@@ -273,6 +281,8 @@ class Onboarding(commands.Cog, name="Onboarding"):
         try:
             parsed = parse_profile_format(message.content)
         except FormatError as exc:
+            if quiet:
+                return
             embed = base_embed(
                 "❌ 양식을 확인해 주세요",
                 Colors.DANGER,

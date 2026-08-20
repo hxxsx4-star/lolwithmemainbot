@@ -3,6 +3,8 @@
 - `/등록 [유저] [롤닉네임#태그]` : 라이엇 API 로 계정을 확인하고 등록
 - `/등록해제 [유저]` : 관리자용 등록 해제
 - `/내계정` : 내 등록 정보 확인
+
+서버를 나가면 등록은 자동으로 풀린다. 포인트와 경고 기록은 남겨 둔다.
 """
 from __future__ import annotations
 
@@ -12,7 +14,7 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 
-from config import Channels, Colors
+from config import Channels, Colors, GUILD_ID
 from core.checks import is_staff
 from core.registration import register_riot_account
 from utils.logs import base_embed, send_log, truncate, user_field
@@ -27,6 +29,43 @@ class RiotRegister(commands.Cog, name="RiotRegister"):
 
     def __init__(self, bot: commands.Bot) -> None:
         self.bot = bot
+
+    # ------------------------------------------------------- 나가면 자동 해제
+
+    @commands.Cog.listener()
+    async def on_member_remove(self, member: discord.Member) -> None:
+        """서버를 나가면 롤 계정 등록을 푼다.
+
+        같은 롤 계정을 다른 사람이 다시 등록할 수 있어야 하고, 나간 사람이
+        서버원으로 남아 있으면 집계도 어긋난다.
+
+        **포인트와 경고 기록은 지우지 않는다.** 다시 들어오는 사람이 적지
+        않은데 모아 둔 포인트가 사라지면 문의로 이어진다. 등록만 푼다.
+        """
+        if GUILD_ID is not None and member.guild.id != GUILD_ID:
+            return
+
+        user = await self.bot.db.get_user(member.id)
+        if not user.registered:
+            return
+
+        await self.bot.db.clear_riot_account(member.id)
+        log.info("서버 탈퇴로 등록 해제: %s (%s)", member, user.riot_id)
+
+        embed = base_embed(
+            "🚪 서버 탈퇴 · 등록 자동 해제",
+            Colors.DANGER,
+            description="서버를 나가서 롤 계정 등록을 해제했습니다.",
+        )
+        embed.set_author(name=str(member), icon_url=member.display_avatar.url)
+        embed.add_field(name="대상", value=user_field(member), inline=True)
+        embed.add_field(name="해제된 계정", value=f"`{user.riot_id}`", inline=True)
+        embed.add_field(
+            name="보유 포인트",
+            value=f"{user.points:,}P (그대로 유지)",
+            inline=True,
+        )
+        await send_log(self.bot, Channels.REGISTER_LOG, embed)
 
     @app_commands.command(name="등록", description="롤 닉네임#태그를 서버에 등록합니다.")
     @app_commands.describe(
