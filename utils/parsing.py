@@ -88,11 +88,20 @@ def valid_tag(tag: str) -> bool:
     return all(ch.isalnum() or ch == " " for ch in tag)
 
 
-def normalize(text: str) -> str:
-    """전각 기호를 반각으로 바꾸고 공백을 정리한다."""
+def normalize(text: str, *, collapse: bool = True) -> str:
+    """전각 기호를 반각으로 바꾸고 공백을 정리한다.
+
+    `collapse=False` 면 연속 공백을 **그대로 둔다.** 롤 아이디는 공백 개수가
+    다르면 아예 다른 계정이기 때문이다. 실제로 `Hide on bush#KR 0` 과
+    `Hide on bush#KR  0` 은 PUUID 가 다른 서로 남남인 계정이다. 합쳐 버리면
+    엉뚱한 사람의 계정을 등록하게 된다.
+    """
     for wide, narrow in FULLWIDTH.items():
         text = text.replace(wide, narrow)
-    return " ".join(text.strip().split())
+    if collapse:
+        return " ".join(text.strip().split())
+    # 줄바꿈·탭은 공백으로 바꾸되 **개수는 건드리지 않는다**
+    return re.sub(r"[^\S ]", " ", text).strip()
 
 
 @dataclass(slots=True)
@@ -282,7 +291,10 @@ def _check_lanes(part: str) -> tuple[Optional[str], Optional[str], list[str]]:
 
 def parse_profile_format(text: str) -> ProfileFormat:
     """닉네임 양식 문자열을 해석한다. 실패하면 잘못된 곳을 모두 담아 FormatError."""
-    raw = normalize(text)
+    # 여기서 공백을 합치면 롤 아이디를 잘라내기도 전에 `KR  0` 이 `KR 0` 이
+    # 되어 남의 계정이 등록된다. 합치지 않고 자른 뒤, 공백이 의미 없는
+    # 티어·라인 칸만 따로 정리한다.
+    raw = normalize(text, collapse=False)
     if not raw:
         raise FormatError("내용이 비어 있습니다.")
 
@@ -294,7 +306,8 @@ def parse_profile_format(text: str) -> ProfileFormat:
             "`롤닉네임#태그/티어/주라인 부라인` 처럼 **`/` 두 개**로 나눠 주세요."
         )
 
-    riot_part, tier_part, lane_part = (p.strip() for p in parts)
+    riot_part = parts[0].strip()                  # 안쪽 공백은 그대로 둔다
+    tier_part, lane_part = (normalize(p) for p in parts[1:])
     issues: list[str] = []
 
     # 1) 롤 닉네임 # 태그
@@ -345,7 +358,8 @@ def matches_format(text: str) -> bool:
 
 def split_riot_id(text: str) -> tuple[str, str]:
     """`롤닉네임#태그` 문자열을 분리한다."""
-    value = normalize(text)
+    # 롤 아이디는 공백 개수가 계정을 가르므로 합치지 않는다
+    value = normalize(text, collapse=False)
     if "#" not in value:
         raise FormatError("`롤닉네임#태그` 형태로 입력해 주세요. (예: `홍길동#KR1`)")
     game_name, tag_line = (s.strip() for s in value.rsplit("#", 1))
