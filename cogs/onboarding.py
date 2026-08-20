@@ -30,7 +30,7 @@ from config import (
     VERIFY_REMINDER_REPLACE,
     VERIFY_REMINDER_TEXT,
 )
-from core.checks import staff_only
+from core.checks import is_staff, staff_only
 from core.registration import register_riot_account
 from utils.logs import base_embed, truncate
 from utils.parsing import FormatError, parse_profile_format
@@ -260,6 +260,11 @@ class Onboarding(commands.Cog, name="Onboarding"):
         if message.channel.id != Channels.ONBOARDING:
             return
         if not isinstance(message.author, discord.Member):
+            return
+
+        # 관리진은 이 채널에 안내나 공지를 올린다. 그걸 양식으로 읽으면
+        # "양식을 확인해 주세요" 가 따라붙어 채널만 지저분해진다.
+        if is_staff(message.author):
             return
 
         if message.author.id in self._processing:
