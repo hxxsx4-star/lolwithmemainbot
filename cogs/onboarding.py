@@ -49,6 +49,7 @@ REMINDER_TIMES = [dt.time(hour=h, tzinfo=TIMEZONE) for h in VERIFY_REMINDER_HOUR
 
 # 직전에 올린 안내 메시지를 기억해 두는 키 (panels 테이블 재사용)
 REMINDER_PANEL_KEY = "verify_reminder"
+NICKNAME_GUIDE_KEY = "nickname_guide"
 
 GUIDE = (
     "**양식**  `롤닉네임#태그/올해최고티어/주라인 부라인`\n"
@@ -59,6 +60,43 @@ GUIDE = (
     "**숫자** 아이언~다이아는 **단계 1~4** (`E4` = 에메랄드 4), "
     "마스터 이상은 **LP** (`M405` = 마스터 405LP)"
 )
+
+
+def nickname_guide_embed() -> discord.Embed:
+    """닉네임 변경 채널에 붙일 안내.
+
+    내용을 문자열로 박아 두지 않고 `GUIDE` 를 비롯한 설정에서 만들어 낸다.
+    티어 약자나 라인 표기를 바꾸면 여기 문구도 저절로 따라온다.
+    """
+    embed = base_embed(
+        "⚒️ 닉네임 · 티어 변경",
+        Colors.TEAL,
+        description=(
+            "이 채널에 **양식 그대로 한 줄**만 적으면 서버 닉네임과 "
+            "티어 · 라인 역할이 자동으로 바뀝니다."
+        ),
+    )
+    embed.add_field(name="양식", value=GUIDE, inline=False)
+    embed.add_field(
+        name="이럴 때 쓰세요",
+        value=(
+            "· 시즌이 지나 **티어가 올랐을 때**\n"
+            "· 주 라인 · 부 라인이 바뀌었을 때\n"
+            "· **롤 닉네임을 바꿨을 때** (새 계정으로 다시 연결됩니다)"
+        ),
+        inline=False,
+    )
+    embed.add_field(
+        name="알아두기",
+        value=(
+            "· 양식이 틀리면 봇이 **어디가 틀렸는지 짚어 줍니다.** 고쳐서 다시 적으면 됩니다\n"
+            "· 예전 티어 · 라인 역할은 자동으로 회수되니 직접 뗄 필요 없습니다\n"
+            "· 남의 계정은 등록할 수 없습니다"
+        ),
+        inline=False,
+    )
+    embed.set_footer(text="롤 같이 하자 · 이 안내는 봇이 최신 설정으로 유지합니다")
+    return embed
 
 
 class Onboarding(commands.Cog, name="Onboarding"):
@@ -72,9 +110,68 @@ class Onboarding(commands.Cog, name="Onboarding"):
 
     async def cog_load(self) -> None:
         self.verify_reminder.start()
+        self.refresh_guide.start()
 
     async def cog_unload(self) -> None:
         self.verify_reminder.cancel()
+        self.refresh_guide.cancel()
+
+    # -------------------------------------------------- 닉네임 변경 안내 유지
+
+    @tasks.loop(count=1)
+    async def refresh_guide(self) -> None:
+        """봇이 뜰 때마다 안내를 지금 설정으로 다시 그린다.
+
+        새로 올리지 않고 **기존 메시지를 고친다.** 매번 새로 올리면 채널이
+        같은 안내로 도배되고, 사람들이 위쪽 낡은 안내를 보게 된다.
+        """
+        for guild in self.bot.guilds:
+            if GUILD_ID is not None and guild.id != GUILD_ID:
+                continue
+            try:
+                await self.post_nickname_guide(guild)
+            except Exception:
+                log.exception("[%s] 닉네임 안내 갱신 실패", guild.name)
+
+    @refresh_guide.before_loop
+    async def before_refresh_guide(self) -> None:
+        await self.bot.wait_until_ready()
+
+    async def post_nickname_guide(
+        self, guild: discord.Guild
+    ) -> discord.Message | None:
+        """안내를 올리거나, 이미 있으면 최신 내용으로 고친다."""
+        channel = guild.get_channel(Channels.NICKNAME_UPDATE)
+        if not isinstance(channel, discord.abc.Messageable):
+            log.warning(
+                "닉네임 변경 채널(%s)을 찾을 수 없습니다.", Channels.NICKNAME_UPDATE
+            )
+            return None
+
+        embed = nickname_guide_embed()
+        panel = await self.bot.db.get_panel(NICKNAME_GUIDE_KEY)
+
+        if panel and int(panel["channel_id"]) == channel.id:
+            try:
+                message = await channel.fetch_message(int(panel["message_id"]))
+                await message.edit(embed=embed)
+                return message
+            except discord.NotFound:
+                pass                      # 지워졌으면 새로 올린다
+            except discord.HTTPException as exc:
+                log.warning("닉네임 안내 수정 실패: %s", exc)
+                return None
+
+        try:
+            message = await channel.send(embed=embed)
+        except discord.HTTPException as exc:
+            log.warning("닉네임 안내 게시 실패: %s", exc)
+            return None
+
+        await self.bot.db.set_panel(
+            NICKNAME_GUIDE_KEY, guild.id, channel.id, message.id
+        )
+        return message
 
     # ------------------------------------------------------- 인증 안내 재공지
 
@@ -257,7 +354,9 @@ class Onboarding(commands.Cog, name="Onboarding"):
     async def on_message(self, message: discord.Message) -> None:
         if message.author.bot or message.guild is None:
             return
-        if message.channel.id != Channels.ONBOARDING:
+        # 자기소개는 미등록만, 닉네임변경은 등록을 마친 사람만 볼 수 있다.
+        # 양식 처리는 똑같으므로 두 채널을 함께 받는다.
+        if message.channel.id not in (Channels.ONBOARDING, Channels.NICKNAME_UPDATE):
             return
         if not isinstance(message.author, discord.Member):
             return
@@ -327,7 +426,7 @@ class Onboarding(commands.Cog, name="Onboarding"):
             parsed.game_name,
             parsed.tag_line,
             actor=member,
-            source=f"<#{Channels.ONBOARDING}> 자동 등록",
+            source=f"<#{message.channel.id}> 자동 등록",
         )
         if not result.ok:
             # 등록만 실패해도 닉네임·역할은 이미 반영됐으니 그 사실을 함께 알린다
