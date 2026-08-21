@@ -5,19 +5,23 @@
 """
 from __future__ import annotations
 
+import datetime as dt
 import logging
 
 import discord
 from discord import app_commands
-from discord.ext import commands
+from discord.ext import commands, tasks
 
-from config import Channels, Colors
+from config import Channels, Colors, GUILD_ID, Scrim as Config, TIMEZONE
 from core.checks import can_host_scrim, scrim_host_only
+from core.db import now
 from utils.logs import base_embed, truncate
 
 log = logging.getLogger("mainbot.scrim")
 
 FULL_ROSTER = 10  # 5대5
+
+AUTO_TIME = dt.time(hour=Config.AUTO_HOUR, tzinfo=TIMEZONE)
 
 RULE_CHOICES = [
     app_commands.Choice(name="하드 피어리스", value="하드피어리스"),
@@ -73,6 +77,92 @@ class Scrim(commands.Cog, name="Scrim"):
 
     async def cog_load(self) -> None:
         self.bot.add_view(ScrimView(self))
+        self.daily_scrim.start()
+
+    async def cog_unload(self) -> None:
+        self.daily_scrim.cancel()
+
+    # ------------------------------------------------------- 매일 자동 생성
+
+    @tasks.loop(time=AUTO_TIME)
+    async def daily_scrim(self) -> None:
+        """정해진 시각에 모집 글을 하나 올리고, 어제 글은 접는다."""
+        for guild in self.bot.guilds:
+            if GUILD_ID is not None and guild.id != GUILD_ID:
+                continue
+            try:
+                await self._close_stale(guild)
+                await self._open_daily(guild)
+            except Exception:
+                log.exception("[%s] 내전 자동 생성 실패", guild.name)
+
+    @daily_scrim.before_loop
+    async def before_daily_scrim(self) -> None:
+        await self.bot.wait_until_ready()
+
+    async def _close_stale(self, guild: discord.Guild) -> None:
+        """오래된 모집 글을 접는다.
+
+        매일 새 글을 올리므로 접지 않으면 포럼이 빈 글로 막힌다. 인원이
+        다 찬 글은 실제로 진행 중일 수 있으니 건드리지 않는다.
+        """
+        cutoff = now() - dt.timedelta(hours=Config.STALE_HOURS)
+        for row in await self.bot.db.open_scrims_before(cutoff.isoformat()):
+            if int(row["members"]) >= FULL_ROSTER:
+                continue
+            thread_id = int(row["thread_id"])
+            await self.bot.db.set_scrim_status(thread_id, "closed")
+
+            thread = guild.get_thread(thread_id)
+            if thread is None:
+                continue
+            try:
+                embed = await self.build_embed(thread_id, guild)
+                message = await thread.fetch_message(int(row["message_id"]))
+                await message.edit(embed=embed, view=None)
+                await thread.edit(archived=True, reason="모집 기간 종료")
+            except discord.HTTPException as exc:
+                log.warning("내전 마감 처리 실패(%s): %s", thread_id, exc)
+            else:
+                log.info("모집 마감: %s (%d명)", row["title"], int(row["members"]))
+
+    async def _open_daily(self, guild: discord.Guild) -> None:
+        forum = guild.get_channel(Channels.SCRIM_FORUM)
+        if not isinstance(forum, discord.ForumChannel):
+            log.warning("내전 포럼(%s)을 찾지 못해 자동 생성을 건너뜁니다.", Channels.SCRIM_FORUM)
+            return
+
+        today = now()
+        title = Config.AUTO_TITLE.format(month=today.month, day=today.day)
+        rule, series = Config.AUTO_RULE, Config.AUTO_SERIES
+
+        placeholder = base_embed(f"⚔️ {title}", Colors.GOLD, description="내전을 준비하는 중…")
+        try:
+            created = await forum.create_thread(
+                name=f"[{series}] {title}"[:100],
+                embed=placeholder,
+                view=ScrimView(self),
+                reason="매일 자동 생성",
+            )
+        except discord.HTTPException as exc:
+            log.warning("내전 자동 생성 실패: %s", exc)
+            return
+
+        thread, message = created.thread, created.message
+        # 방장은 봇으로 둔다. 자동 생성이라 주최자가 따로 없고, 사람을 방장으로
+        # 넣으면 본인도 모르게 참가자로 잡힌다
+        host_id = self.bot.user.id if self.bot.user else 0
+        await self.bot.db.create_scrim(
+            thread.id, guild.id, host_id, title, rule, series, message.id
+        )
+
+        try:
+            await message.edit(
+                embed=await self.build_embed(thread.id, guild), view=ScrimView(self)
+            )
+        except discord.HTTPException:
+            pass
+        log.info("내전 자동 생성: %s (%s · %s)", title, rule, series)
 
     # ----------------------------------------------------------- 임베드 구성
 

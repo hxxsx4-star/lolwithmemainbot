@@ -477,6 +477,23 @@ LEAGUE_NAMES: dict[str, str] = {
 }
 
 
+class Scrim:
+    """내전 자동 생성 수치.
+
+    매일 정해진 시각에 모집 글을 하나 올린다. 만들기만 하고 두면 아무도 안
+    들어온 글이 포럼에 쌓이므로, 다음 날 글을 올릴 때 **인원이 안 모인 어제
+    글은 접는다.**
+    """
+
+    AUTO_HOUR = 18             # 매일 이 시각(KST)에 올린다
+    AUTO_RULE = "하드피어리스"
+    AUTO_SERIES = "3판2선"
+    AUTO_TITLE = "{month}/{day} 정기 내전"
+
+    # 이만큼 지난 모집 글은 접는다. 하루 주기라 그 전에 정리된다
+    STALE_HOURS = 20
+
+
 class Watchdog:
     """봇이 조용히 고장 났는지 스스로 살피는 주기와 기준.
 

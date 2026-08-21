@@ -669,6 +669,17 @@ class Database:
         await self.conn.commit()
         return cur.rowcount > 0
 
+    async def open_scrims_before(self, before_iso: str) -> list[aiosqlite.Row]:
+        """그 시각 전에 열려 아직 모집 중인 내전. 오래된 글을 접을 때 쓴다."""
+        return await self._fetchall(
+            "SELECT s.*,"
+            " (SELECT COUNT(*) FROM scrim_members m WHERE m.thread_id = s.thread_id)"
+            "   AS members"
+            " FROM scrims s WHERE s.status = 'open' AND s.created_at < ?"
+            " ORDER BY s.created_at",
+            (before_iso,),
+        )
+
     async def scrim_members(self, thread_id: int) -> list[int]:
         rows = await self._fetchall(
             "SELECT user_id FROM scrim_members WHERE thread_id = ? ORDER BY joined_at ASC",
