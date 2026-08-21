@@ -57,6 +57,7 @@ HEADER_HEIGHT = 106  # 아바타와 이름이 차지하는 높이
 
 # 레벨 한 줄의 높이: 라벨(34) + 여백(10) + 게이지(16) + 여백(8) + XP 글자(22)
 LEVEL_ROW_HEIGHT = 90
+CHAMPION_SIZE = 84    # 머리말에 얹는 챔피언 초상화 한 변
 
 
 @dataclass(frozen=True, slots=True)
@@ -284,6 +285,22 @@ def _load_background() -> Image.Image:
 
 
 # ------------------------------------------------------------ 아바타
+
+
+def _champion_icon(data: Optional[bytes], size: int) -> Optional[Image.Image]:
+    """챔피언 초상화를 둥근 사각형으로 다듬는다. 못 열면 None."""
+    if not data:
+        return None
+    try:
+        with Image.open(io.BytesIO(data)) as img:
+            icon = img.convert("RGBA").resize((size, size), Image.LANCZOS)
+    except Exception as exc:  # Pillow 예외 종류가 많아 통째로 받는다
+        log.debug("챔피언 초상화를 열지 못했습니다: %s", exc)
+        return None
+
+    out = Image.new("RGBA", (size, size), (0, 0, 0, 0))
+    out.paste(icon, (0, 0), _rounded_mask((size, size), 16))
+    return out
 
 
 def _circle_avatar(data: Optional[bytes], diameter: int) -> Image.Image:
@@ -538,6 +555,8 @@ def render_profile_card(
     theme: Theme = DEFAULT_CARD_THEME,
     slogan: str = PROFILE_SLOGAN,
     prediction_record: str = "",
+    champion_bytes: Optional[bytes] = None,
+    champion_name: str = "",
 ) -> io.BytesIO:
     """프로필 카드를 그려 PNG 바이트로 돌려준다.
 
@@ -562,7 +581,13 @@ def render_profile_card(
 
     text_x = 156
     points_box_x = 968
-    name_max_w = points_box_x - text_x - 28
+
+    # 산 챔피언 초상화는 보유 포인트 상자 왼쪽에 놓는다. 자리를 차지하는
+    # 만큼 이름과 전적이 쓸 수 있는 폭을 줄여야 서로 겹치지 않는다.
+    champion = _champion_icon(champion_bytes, CHAMPION_SIZE)
+    champion_left = points_box_x - 24 - CHAMPION_SIZE
+    right_limit = (champion_left - 20) if champion is not None else (points_box_x - 28)
+    name_max_w = right_limit - text_x
 
     draw.text((text_x, EDGE - 6), slogan, font=_font(20), fill=MUTED_WARM)
 
@@ -582,7 +607,7 @@ def render_profile_card(
         rec_font = _font(17, bold=False)
         rec_w = draw.textlength(prediction_record, font=rec_font)
         draw.text(
-            (points_box_x - 28, EDGE + 84),
+            (right_limit, EDGE + 84),
             prediction_record,
             font=rec_font,
             fill=MUTED_WARM,
@@ -610,6 +635,28 @@ def render_profile_card(
             MUTED,
             spacing=2.4,
         )
+
+    # ---------------------------------------------------------- 챔피언
+    if champion is not None:
+        champion_top = EDGE + (avatar_d + 8 - CHAMPION_SIZE) // 2
+        canvas.alpha_composite(champion, (champion_left, champion_top))
+        # 테두리를 얇게 둘러 배경과 분리한다
+        canvas.alpha_composite(
+            _rounded(
+                (CHAMPION_SIZE, CHAMPION_SIZE), 16, None,
+                outline=(*theme.accent, 200), width=2,
+            ),
+            (champion_left, champion_top),
+        )
+        if champion_name:
+            name_font = _font(15, bold=False)
+            draw.text(
+                (champion_left + CHAMPION_SIZE // 2, champion_top + CHAMPION_SIZE + 6),
+                _fit(draw, champion_name, name_font, CHAMPION_SIZE + 16),
+                font=name_font,
+                fill=MUTED,
+                anchor="ma",
+            )
 
     # ------------------------------------------------------- 보유 포인트
     pb_w, pb_h = 188, 70

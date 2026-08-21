@@ -11,11 +11,13 @@ from discord.ext import commands
 
 from config import (
     CARD_THEMES,
+    CHAMPIONS,
     DEFAULT_THEME,
     PROFILE_SLOGAN,
     RANK_CACHE_SECONDS,
     TIER_NAMES,
 )
+from utils import ddragon
 from utils.card import Theme, render_profile_card, theme_from_spec
 from utils.parsing import FormatError, parse_profile_format
 from utils.riot import RankEntry, RiotError
@@ -96,6 +98,18 @@ class Profile(commands.Cog, name="Profile"):
         slogan = str(slogan_row["value"]) if slogan_row and slogan_row["value"] else PROFILE_SLOGAN
         return theme_from_spec(spec), slogan
 
+    async def _champion(self, user_id: int) -> tuple[Optional[bytes], str]:
+        """상점에서 산 챔피언의 초상화와 이름. 안 샀으면 (None, "").
+
+        초상화를 못 받아도 카드는 그대로 그려야 하므로 조용히 비워 둔다.
+        """
+        row = await self.bot.db.active_purchase(user_id, "champion_role")
+        if row is None:
+            return None, ""
+        key = str(row["item_key"])
+        spec = CHAMPIONS.get(key)
+        return await ddragon.portrait(key), (spec.name if spec else "")
+
     def _tier_fields(
         self, entry: Optional[RankEntry], registered: bool
     ) -> tuple[Optional[str], str, str]:
@@ -154,6 +168,7 @@ class Profile(commands.Cog, name="Profile"):
                 solo_record = "서버 등록 티어 기준"
 
         theme, slogan = await self._cosmetics(target.id)
+        champion_bytes, champion_name = await self._champion(target.id)
 
         # 승부예측 전적. 아직 결과가 나온 예측이 없으면 빈 줄로 두어 카드가
         # 괜히 허전해 보이지 않게 한다
@@ -193,6 +208,8 @@ class Profile(commands.Cog, name="Profile"):
             theme=theme,
             slogan=slogan,
             prediction_record=prediction_record,
+            champion_bytes=champion_bytes,
+            champion_name=champion_name,
         )
 
         file = discord.File(buffer, filename=f"profile_{target.id}.png")
