@@ -34,8 +34,15 @@ GENERAL_SECTIONS: list[tuple[str, str]] = [
         f"`/출석` 하루 한 번 **{Economy.ATTENDANCE_REWARD}{Economy.UNIT}**\n"
         f"`/포인트 [유저]` 보유 포인트 확인\n"
         f"`/랭킹` 포인트 상위 10명\n"
+        f"→ **연속 출석 보너스** "
+        + " · ".join(
+            f"{d}일 +{b:,}{Economy.UNIT}"
+            for d, b in sorted(Economy.STREAK_BONUS.items())
+        )
+        + "\n"
         f"→ 음성 채널에 있으면 **{Economy.VOICE_INTERVAL_MINUTES}분마다 "
-        f"{Economy.VOICE_REWARD}{Economy.UNIT}** 가 자동으로 쌓입니다.",
+        f"{Economy.VOICE_REWARD}{Economy.UNIT}** 가 쌓이고, "
+        f"**여럿이 모이면 최대 x{max(Economy.VOICE_GROUP_MULTIPLIER.values()):g}** 까지 붙습니다.",
     ),
     (
         "🛒 상점",

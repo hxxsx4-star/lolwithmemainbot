@@ -97,22 +97,41 @@ class Economy_(commands.Cog, name="Economy"):
         if after > before:
             log.info("[%s] 음성 레벨 %d → %d", member, before, after)
 
+    @staticmethod
+    def group_multiplier(people: int) -> float:
+        """같은 채널에 몇 명 있는지에 따른 배수."""
+        for need in sorted(Economy.VOICE_GROUP_MULTIPLIER, reverse=True):
+            if people >= need:
+                return Economy.VOICE_GROUP_MULTIPLIER[need]
+        return 1.0
+
     async def _grant_voice_points(
         self, member: discord.Member, channel: discord.VoiceChannel
     ) -> None:
-        balance = await self.bot.db.add_points(
-            member.id,
-            Economy.VOICE_REWARD,
-            f"음성 활동 {Economy.VOICE_INTERVAL_MINUTES}분",
-        )
+        # 사람이 모일수록 더 준다. 혼자 틀어 놓은 것과 여럿이 모여 노는 것을
+        # 같이 쳐 주면 통화방에 모일 이유가 없다. 봇은 머릿수에서 뺀다
+        people = sum(1 for m in channel.members if not m.bot)
+        multiplier = self.group_multiplier(people)
+        reward = int(Economy.VOICE_REWARD * multiplier)
+
+        reason = f"음성 활동 {Economy.VOICE_INTERVAL_MINUTES}분"
+        if multiplier > 1:
+            reason += f" ({people}명 x{multiplier:g})"
+        balance = await self.bot.db.add_points(member.id, reward, reason)
+
         user = await self.bot.db.get_user(member.id)
+        bonus_note = (
+            f"\n**{people}명**이 함께 있어 **x{multiplier:g}** 적용됐습니다."
+            if multiplier > 1
+            else ""
+        )
         embed = base_embed(
             "🎧 음성 활동 포인트",
             Colors.TEAL,
             description=(
                 f"{member.mention} 님이 음성 채널에 "
                 f"**{Economy.VOICE_INTERVAL_MINUTES}분** 머물러 "
-                f"**{fmt_points(Economy.VOICE_REWARD)}** 를 받았습니다."
+                f"**{fmt_points(reward)}** 를 받았습니다.{bonus_note}"
             ),
         )
         embed.set_author(name=str(member), icon_url=member.display_avatar.url)
@@ -160,16 +179,33 @@ class Economy_(commands.Cog, name="Economy"):
             await interaction.response.send_message(embed=embed, ephemeral=True)
             return
 
+        bonus = Economy.STREAK_BONUS.get(streak, 0)
         balance = await self.bot.db.add_points(
             interaction.user.id, Economy.ATTENDANCE_REWARD, "출석 체크"
         )
-        embed = base_embed(
-            "✅ 출석 완료",
-            Colors.SUCCESS,
-            description=(
-                f"**{fmt_points(Economy.ATTENDANCE_REWARD)}** 를 받았습니다!"
-            ),
-        )
+        if bonus:
+            balance = await self.bot.db.add_points(
+                interaction.user.id, bonus, f"연속 출석 {streak}일 보너스"
+            )
+
+        description = f"**{fmt_points(Economy.ATTENDANCE_REWARD)}** 를 받았습니다!"
+        if bonus:
+            description = (
+                f"**{fmt_points(Economy.ATTENDANCE_REWARD)}** + 연속 출석 "
+                f"**{streak}일** 보너스 **{fmt_points(bonus)}**\n"
+                f"= 오늘 총 **{fmt_points(Economy.ATTENDANCE_REWARD + bonus)}** 🎉"
+            )
+        else:
+            nxt = next(
+                (d for d in sorted(Economy.STREAK_BONUS) if d > streak), None
+            )
+            if nxt is not None:
+                description += (
+                    f"\n-# {nxt - streak}일 더 이어 오면 "
+                    f"보너스 {fmt_points(Economy.STREAK_BONUS[nxt])}"
+                )
+
+        embed = base_embed("✅ 출석 완료", Colors.SUCCESS, description=description)
         embed.set_author(
             name=str(interaction.user), icon_url=interaction.user.display_avatar.url
         )
@@ -188,7 +224,12 @@ class Economy_(commands.Cog, name="Economy"):
         )
         log_embed.add_field(name="유저", value=user_field(interaction.user), inline=True)
         log_embed.add_field(
-            name="지급", value=f"+{fmt_points(Economy.ATTENDANCE_REWARD)}", inline=True
+            name="지급",
+            value=(
+                f"+{fmt_points(Economy.ATTENDANCE_REWARD + bonus)}"
+                + (f"\n(연속 {streak}일 보너스 +{fmt_points(bonus)})" if bonus else "")
+            ),
+            inline=True,
         )
         log_embed.add_field(name="현재 보유", value=fmt_points(balance), inline=True)
         log_embed.add_field(name="연속 출석", value=f"{streak}일", inline=True)

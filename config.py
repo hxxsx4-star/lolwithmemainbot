@@ -177,8 +177,28 @@ class Economy:
     UNIT = "P"
     ATTENDANCE_REWARD = 100      # /출석 보상
     VOICE_INTERVAL_MINUTES = 10  # 음성 포인트 지급 주기
-    VOICE_REWARD = 10            # 주기마다 지급할 포인트
+    VOICE_REWARD = 10            # 주기마다 지급할 기본 포인트
     IGNORE_AFK_CHANNEL = True    # 잠수 채널은 적립 제외
+
+    # 연속 출석 보너스. 출석은 하루 100P 뿐이라 굳이 칠 이유가 없어서 사실상
+    # 죽어 있었다(전체 31건). 며칠 이어 오면 눈에 띄게 얹어 준다.
+    # {연속 일수: 그날 추가로 주는 포인트}
+    STREAK_BONUS: dict[int, int] = {
+        3: 100,
+        7: 300,
+        14: 700,
+        30: 2_000,
+    }
+
+    # 같은 음성 채널에 몇 명 있느냐에 따라 배수를 준다.
+    # 혼자 틀어 놓은 사람과 다섯이 모여 떠든 사람이 같은 보상을 받으면
+    # 모일 이유가 없다. {최소 인원: 배수} — 큰 쪽부터 맞춰 본다.
+    VOICE_GROUP_MULTIPLIER: dict[int, float] = {
+        5: 2.5,
+        3: 2.0,
+        2: 1.5,
+        1: 1.0,
+    }
 
 
 class Level:
