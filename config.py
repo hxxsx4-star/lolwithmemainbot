@@ -224,7 +224,15 @@ class Level:
 class Shop:
     """상점 수치."""
 
-    DURATION_DAYS = 30        # 구매 아이템 유지 기간
+    DURATION_DAYS = 30        # 기본 유지 기간
+
+    # 비싼 것은 더 오래 간다. 보통 유저의 자력 수입이 하루 14P 라 12,000P 짜리는
+    # 모으는 데 800일이 넘게 걸리는데, 그게 30일 만에 사라지면 아무도 못 산다.
+    # {이 가격 이상: 유지 일수} — 큰 쪽부터 맞춰 본다.
+    LONG_DURATION: dict[int, int] = {
+        10_000: 90,
+        5_000: 60,
+    }
     THEME_PRICE = 2_000       # 프로필 카드 테마
     SLOGAN_PRICE = 3_000      # 프로필 카드 문구
     COLOR_ROLE_PRICE = 2_000  # 색상 역할
@@ -434,6 +442,14 @@ CARD_THEMES: dict[str, ThemeSpec] = {
 SHOP_THEME_KEYS: tuple[str, ...] = tuple(
     k for k in CARD_THEMES if k != DEFAULT_THEME
 )
+
+
+def shop_duration(price: int) -> int:
+    """이 가격의 아이템이 며칠 유지되는지."""
+    for floor in sorted(Shop.LONG_DURATION, reverse=True):
+        if price >= floor:
+            return Shop.LONG_DURATION[floor]
+    return Shop.DURATION_DAYS
 
 
 class Prediction:

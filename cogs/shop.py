@@ -19,6 +19,7 @@ from discord import app_commands
 from discord.ext import commands, tasks
 
 from config import (
+    shop_duration,
     CARD_THEMES,
     CHAMPIONS,
     Channels,
@@ -377,7 +378,7 @@ class ShopCog(commands.Cog, name="Shop"):
         # (역할은 이미 갈아 끼웠고, 보유 목록에도 남으면 안 된다)
         await self.bot.db.expire_purchases(member.id, kind)
         expires = await self.bot.db.add_purchase(
-            member.id, kind, item_key, price, Shop.DURATION_DAYS, value
+            member.id, kind, item_key, price, shop_duration(price), value
         )
 
         await self._log_purchase(member, kind, item_key, price, value, expires)
@@ -542,7 +543,8 @@ def home_embed(balance: int) -> discord.Embed:
         Colors.GOLD,
         description=(
             f"보유 포인트 **{fmt_points(balance)}**\n"
-            f"모든 아이템은 **{Shop.DURATION_DAYS}일**간 유지됩니다."
+            f"아이템은 **{Shop.DURATION_DAYS}일**간 유지되고, "
+            f"비싼 것은 더 오래갑니다."
         ),
     )
     embed.add_field(
@@ -652,7 +654,8 @@ class ShopView(discord.ui.View):
                 Colors.GOLD,
                 description=(
                     f"보유 포인트 **{fmt_points(balance)}**\n"
-                    f"모두 **{Shop.DURATION_DAYS}일** 유지됩니다."
+                    f"색상 **{shop_duration(Shop.COLOR_ROLE_PRICE)}일** · "
+                    f"LCK 응원 **{shop_duration(Shop.TEAM_ROLE_PRICE)}일** 유지."
                 ),
             )
             embed.add_field(
@@ -689,7 +692,8 @@ class ShopView(discord.ui.View):
                 "🪪 기타상점",
                 Colors.TEAL,
                 description=(
-                    f"`/프로필` 카드를 꾸밉니다. 모두 **{Shop.DURATION_DAYS}일** 유지.\n"
+                    f"`/프로필` 카드를 꾸밉니다. "
+                    f"**{shop_duration(Shop.THEME_PRICE)}일** 유지.\n"
                     f"보유 포인트 **{fmt_points(balance)}**"
                 ),
             )
@@ -722,7 +726,8 @@ class ShopView(discord.ui.View):
             Colors.TEAL,
             description=(
                 f"보유 포인트 **{fmt_points(balance)}** · "
-                f"**{Shop.DURATION_DAYS}일** 유지\n"
+                f"일반 **{shop_duration(Shop.CHAMPION_ROLE_PRICE)}일** · "
+                f"그라데이션 **{shop_duration(Shop.CHAMPION_GRADIENT_PRICE)}일** 유지\n"
                 f"일반 {fmt_points(Shop.CHAMPION_ROLE_PRICE)} · "
                 f"{GRADIENT_MARK} 그라데이션 "
                 f"{fmt_points(Shop.CHAMPION_GRADIENT_PRICE)}"
@@ -839,7 +844,7 @@ class ThemeSelect(discord.ui.Select):
                 discord.SelectOption(
                     label=CARD_THEMES[key].name,
                     value=key,
-                    description=f"{Shop.THEME_PRICE:,}P · {Shop.DURATION_DAYS}일",
+                    description=f"{Shop.THEME_PRICE:,}P · {shop_duration(Shop.THEME_PRICE)}일",
                 )
                 for key in SHOP_THEME_KEYS
             ],
@@ -894,7 +899,8 @@ class RoleSelect(discord.ui.Select):
                     label=names[key],
                     value=key,
                     description=(
-                        f"{self.prices.get(key, price):,}P · {Shop.DURATION_DAYS}일"
+                        f"{self.prices.get(key, price):,}P · "
+                        f"{shop_duration(self.prices.get(key, price))}일"
                     ),
                 )
                 for key in roles

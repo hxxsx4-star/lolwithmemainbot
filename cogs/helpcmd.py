@@ -56,7 +56,8 @@ GENERAL_SECTIONS: list[tuple[str, str]] = [
         f"({Shop.CHAMPION_GRADIENT_PRICE:,}{Economy.UNIT})\n"
         f"→ **기타상점** 프로필 카드 테마 ({Shop.THEME_PRICE:,}{Economy.UNIT}) · "
         f"문구 ({Shop.SLOGAN_PRICE:,}{Economy.UNIT})\n"
-        f"→ 모든 아이템은 **{Shop.DURATION_DAYS}일** 유지됩니다.",
+        f"→ 아이템은 **{Shop.DURATION_DAYS}일** 유지되고, "
+        f"비싼 것은 최대 **{max(Shop.LONG_DURATION.values())}일**까지 갑니다.",
     ),
     (
         "🎯 역할 선택",
