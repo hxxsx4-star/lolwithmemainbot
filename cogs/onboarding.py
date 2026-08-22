@@ -116,6 +116,54 @@ class Onboarding(commands.Cog, name="Onboarding"):
         self.verify_reminder.cancel()
         self.refresh_guide.cancel()
 
+    # ------------------------------------------------------- 신규 가입 환영
+
+    async def send_welcome(self, member: discord.Member) -> bool:
+        """들어온 직후에 등록 방법을 DM 으로 알려 준다.
+
+        서버에 들어오면 자기소개 채널만 보이는데, 왜 그런지 모르면 그냥
+        나간다. 실제로 미등록이 2,700명 넘게 쌓여 있었고 그중 대부분이
+        90일 넘게 그 상태였다.
+
+        **들어온 사람 한 명에게만 보낸다.** 가입 직후 안내는 정상적인
+        온보딩이지만, 오래된 사람들에게 몰아 보내면 스팸으로 취급돼 봇이
+        정지될 수 있다.
+        """
+        embed = base_embed(
+            "🎉 롤 같이 하자에 오신 걸 환영합니다",
+            Colors.GOLD,
+            description=(
+                f"**{member.guild.name}** 에 오신 걸 환영해요!\n\n"
+                f"지금은 <#{Channels.ONBOARDING}> 채널만 보일 거예요. "
+                "롤 계정을 등록하면 나머지가 전부 열립니다."
+            ),
+        )
+        embed.add_field(name="등록 방법", value=GUIDE, inline=False)
+        embed.add_field(
+            name="등록하면 할 수 있는 것",
+            value=(
+                "· 💬 메인 채팅 · 파티모집 · 통화방\n"
+                "· ⚔️ 매일 열리는 5대5 내전\n"
+                "· 💰 출석 · 통화방 활동으로 포인트 적립\n"
+                "· 🏆 LCK 승부예측에 포인트 베팅\n"
+                "· 🪪 랭크와 레벨이 담긴 프로필 카드"
+            ),
+            inline=False,
+        )
+        embed.set_footer(text="롤 같이 하자 · 양식이 틀리면 봇이 알려 드려요")
+
+        try:
+            await member.send(embed=embed)
+        except discord.Forbidden:
+            # DM 을 막아 둔 사람이 많다. 못 보내는 게 흔한 경우라 조용히 넘긴다
+            log.debug("[%s] DM 이 막혀 환영 안내를 보내지 못했습니다.", member)
+            return False
+        except discord.HTTPException as exc:
+            log.warning("[%s] 환영 DM 실패: %s", member, exc)
+            return False
+        log.info("환영 DM 발송: %s", member)
+        return True
+
     # -------------------------------------------------- 닉네임 변경 안내 유지
 
     @tasks.loop(count=1)
@@ -514,9 +562,16 @@ class Onboarding(commands.Cog, name="Onboarding"):
     async def on_member_join(self, member: discord.Member) -> None:
         if member.bot:
             return
+        if GUILD_ID is not None and member.guild.id != GUILD_ID:
+            return
         await ensure_default_roles(member, reason="신규 입장")
         user = await self.bot.db.get_user(member.id)
         await sync_registration_roles(member, user.registered, reason="신규 입장")
+
+        # 역할을 먼저 맞춘 뒤에 보낸다. 안내를 보고 바로 등록하러 갔을 때
+        # 자기소개 채널이 안 보이면 안 되기 때문이다
+        if not user.registered:
+            await self.send_welcome(member)
 
     @commands.Cog.listener()
     async def on_member_update(self, before: discord.Member, after: discord.Member) -> None:

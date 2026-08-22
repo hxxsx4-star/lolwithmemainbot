@@ -1,12 +1,10 @@
 """티켓(문의함) 시스템.
 
-문의 채널에 버튼 패널을 띄우고, 버튼을 누르면 본인과 스태프만 볼 수 있는
+문의 채널에 선택 메뉴를 띄우고, 종류를 고르면 본인과 스태프만 볼 수 있는
 비공개 채널을 만들어 준다.
 
-버튼 배치
-  1행 (초록) : 서버 문의 · 티어 조정
-  2행 (빨강) : 분쟁 및 유저 신고
-  3행 (파랑) : 내전 문의 · 기타 문의
+버튼 다섯 개를 늘어놓는 대신 선택 메뉴 하나를 쓴다. 종류마다 설명 한 줄이
+같이 보여서, 무엇을 고르는지 눌러 보기 전에 알 수 있다.
 """
 from __future__ import annotations
 
@@ -33,6 +31,9 @@ class TicketKind:
     row: int
     prompt: str
 
+    # 선택 메뉴 한 줄에 붙는 설명. 디스코드가 100자까지만 받는다
+    summary: str = ""
+
     # 이 종류만 따로 모아 둘 카테고리. 비우면 문의함 패널이 있는 곳에 만든다
     category_id: int | None = None
 
@@ -48,6 +49,7 @@ TICKET_KINDS: tuple[TicketKind, ...] = (
         style=discord.ButtonStyle.success,
         row=0,
         prompt="서버 이용 중 궁금하거나 건의하고 싶은 점을 자세히 적어 주세요.",
+        summary="서버 이용 문의 · 건의",
     ),
     TicketKind(
         key="tier",
@@ -59,6 +61,7 @@ TICKET_KINDS: tuple[TicketKind, ...] = (
             "티어 조정을 원하시면 **롤 닉네임#태그**와 **현재 티어**를 적고, "
             "전적 검색 링크나 인게임 프로필 사진을 함께 올려 주세요."
         ),
+        summary="내 티어 역할을 실제 티어에 맞게 고치고 싶을 때",
         category_id=Channels.TIER_TICKETS,
         notify_role=Roles.TIER_REVIEWER,
     ),
@@ -72,6 +75,7 @@ TICKET_KINDS: tuple[TicketKind, ...] = (
             "**신고 대상**, **언제 있었던 일인지**, **어떤 일이 있었는지**를 적고 "
             "증거(스크린샷·영상)를 함께 올려 주세요."
         ),
+        summary="유저 신고 · 분쟁 조정 (증거 필요)",
     ),
     TicketKind(
         key="scrim",
@@ -80,6 +84,7 @@ TICKET_KINDS: tuple[TicketKind, ...] = (
         style=discord.ButtonStyle.primary,
         row=2,
         prompt="내전 진행·참가·팀 배정 관련해서 궁금한 점을 적어 주세요.",
+        summary="내전 진행 · 참가 · 팀 배정 문의",
     ),
     TicketKind(
         key="etc",
@@ -88,6 +93,7 @@ TICKET_KINDS: tuple[TicketKind, ...] = (
         style=discord.ButtonStyle.primary,
         row=2,
         prompt="위 항목에 해당하지 않는 문의를 자유롭게 적어 주세요.",
+        summary="위에 없는 그 밖의 문의",
     ),
 )
 
@@ -95,47 +101,65 @@ KIND_BY_KEY: dict[str, TicketKind] = {k.key: k for k in TICKET_KINDS}
 
 
 def panel_embed() -> discord.Embed:
-    embed = base_embed(
+    """문의함 안내.
+
+    종류별 설명은 선택 메뉴 각 줄에 붙으므로 여기서 또 늘어놓지 않는다.
+    같은 내용을 두 번 적으면 나중에 한쪽만 고쳐져 어긋난다.
+    """
+    return base_embed(
         "📮 문의함",
         Colors.GOLD,
         description=(
-            "문의하실 항목의 버튼을 눌러 주세요.\n"
-            "본인과 스태프만 볼 수 있는 **비공개 채널**이 만들어집니다.\n\n"
+            "아래에서 문의 종류를 고르면 본인과 스태프만 볼 수 있는 "
+            "**비공개 채널**이 만들어집니다.\n\n"
             "· 장난성 문의는 제재 대상이 될 수 있습니다.\n"
             "· 답변까지 시간이 걸릴 수 있으니 조금만 기다려 주세요."
         ),
     )
-    for kind in TICKET_KINDS:
-        embed.add_field(
-            name=f"{kind.emoji} {kind.label}", value=kind.prompt, inline=False
+
+
+class TicketSelect(discord.ui.Select):
+    """문의 종류 고르기.
+
+    버튼 다섯 개를 세 줄로 늘어놓는 것보다, 한 줄짜리 선택 메뉴에 종류별
+    설명을 붙이는 편이 읽기 쉽다. 무엇을 고르는지도 눌러 보기 전에 알 수 있다.
+    """
+
+    def __init__(self) -> None:
+        super().__init__(
+            placeholder="문의 종류를 선택해 주세요",
+            min_values=1,
+            max_values=1,
+            custom_id="ticket:select",
+            options=[
+                discord.SelectOption(
+                    label=kind.label,
+                    value=kind.key,
+                    description=kind.summary[:100] or None,
+                    emoji=kind.emoji,
+                )
+                for kind in TICKET_KINDS
+            ],
         )
-    return embed
+
+    async def callback(self, interaction: discord.Interaction) -> None:
+        cog: TicketCog = self.view.cog  # type: ignore[attr-defined]
+        kind = KIND_BY_KEY.get(self.values[0])
+        if kind is None:
+            await interaction.response.send_message(
+                "알 수 없는 문의 종류입니다. 관리자에게 알려 주세요.", ephemeral=True
+            )
+            return
+        await cog.open_ticket(interaction, kind)
 
 
 class TicketPanel(discord.ui.View):
-    """항상 살아 있는 버튼 패널."""
+    """항상 살아 있는 문의함 패널."""
 
     def __init__(self, cog: "TicketCog") -> None:
         super().__init__(timeout=None)
         self.cog = cog
-        for kind in TICKET_KINDS:
-            self.add_item(TicketButton(kind))
-
-
-class TicketButton(discord.ui.Button):
-    def __init__(self, kind: TicketKind) -> None:
-        super().__init__(
-            label=kind.label,
-            emoji=kind.emoji,
-            style=kind.style,
-            row=kind.row,
-            custom_id=f"ticket:open:{kind.key}",
-        )
-        self.kind = kind
-
-    async def callback(self, interaction: discord.Interaction) -> None:
-        cog: TicketCog = self.view.cog  # type: ignore[attr-defined]
-        await cog.open_ticket(interaction, self.kind)
+        self.add_item(TicketSelect())
 
 
 class TicketControls(discord.ui.View):
@@ -179,7 +203,7 @@ class TicketCog(commands.Cog, name="Ticket"):
 
     # -------------------------------------------------------------- 패널
 
-    @app_commands.command(name="문의함생성", description="[관리자] 문의함 버튼 패널을 올립니다.")
+    @app_commands.command(name="문의함생성", description="[관리자] 문의함 선택 패널을 올립니다.")
     @app_commands.describe(채널="패널을 올릴 채널 (비우면 기본 문의함 채널)")
     @app_commands.default_permissions(manage_guild=True)
     @staff_only()
