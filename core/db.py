@@ -871,6 +871,14 @@ class Database:
             (iso(), closed_by, channel_id),
         )
 
+    async def reopen_ticket(self, channel_id: int) -> None:
+        """닫은 문의를 다시 연다. 닫은 기록은 지워 다시 열려 있는 상태로 둔다."""
+        await self._exec(
+            "UPDATE tickets SET status = 'open', closed_at = NULL, closed_by = NULL"
+            " WHERE channel_id = ?",
+            (channel_id,),
+        )
+
     # --------------------------------------------------------- 승부예측
 
     async def add_prediction(

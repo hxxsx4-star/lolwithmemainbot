@@ -153,6 +153,13 @@ class TicketControls(discord.ui.View):
         await self.cog.close_ticket(interaction)
 
     @discord.ui.button(
+        label="다시 열기", emoji="🔓", style=discord.ButtonStyle.primary,
+        custom_id="ticket:reopen",
+    )
+    async def reopen(self, interaction: discord.Interaction, _: discord.ui.Button) -> None:
+        await self.cog.reopen_ticket(interaction)
+
+    @discord.ui.button(
         label="채널 삭제", emoji="🗑️", style=discord.ButtonStyle.danger,
         custom_id="ticket:delete",
     )
@@ -371,10 +378,74 @@ class TicketCog(commands.Cog, name="Ticket"):
             Colors.DARK_GOLD,
             description=(
                 f"{member.mention} 님이 이 문의를 닫았습니다.\n"
-                "기록을 남길 필요가 없다면 **채널 삭제** 버튼을 눌러 주세요. (스태프 전용)"
+                "이야기가 더 남았다면 **다시 열기**, 기록이 필요 없으면 "
+                "**채널 삭제** 를 눌러 주세요. (둘 다 스태프 전용)"
             ),
         )
         await interaction.followup.send(embed=embed)
+
+    async def reopen_ticket(self, interaction: discord.Interaction) -> None:
+        """닫은 문의를 되돌린다. 닫기가 실수였거나 이야기가 더 남았을 때 쓴다."""
+        channel = interaction.channel
+        if not isinstance(channel, discord.TextChannel):
+            return
+        ticket = await self.bot.db.get_ticket(channel.id)
+        if ticket is None:
+            await interaction.response.send_message(
+                "이 채널은 문의 채널이 아닙니다.", ephemeral=True
+            )
+            return
+        if ticket["status"] != "closed":
+            await interaction.response.send_message(
+                "이미 열려 있는 문의입니다.", ephemeral=True
+            )
+            return
+
+        member = interaction.user
+        if not (isinstance(member, discord.Member) and is_staff(member)):
+            await interaction.response.send_message(
+                "문의를 다시 여는 것도 **스태프만** 할 수 있습니다.", ephemeral=True
+            )
+            return
+
+        await interaction.response.defer()
+        await self.bot.db.reopen_ticket(channel.id)
+
+        # 닫을 때 막아 둔 문의자의 발언권을 돌려준다
+        opener_id = int(ticket["user_id"])
+        opener = interaction.guild.get_member(opener_id) if interaction.guild else None
+        if opener is not None:
+            try:
+                await channel.set_permissions(
+                    opener, view_channel=True, send_messages=True,
+                    read_message_history=True, attach_files=True, embed_links=True,
+                    reason="티켓 다시 열림",
+                )
+            except discord.HTTPException:
+                pass
+
+        # 닫을 때 붙인 접두어를 뗀다
+        if channel.name.startswith("닫힘-"):
+            try:
+                await channel.edit(
+                    name=channel.name[len("닫힘-"):], reason="티켓 다시 열림"
+                )
+            except discord.HTTPException:
+                pass
+
+        embed = base_embed(
+            "🔓 문의를 다시 열었습니다",
+            Colors.SUCCESS,
+            description=(
+                f"{member.mention} 님이 이 문의를 다시 열었습니다.\n"
+                f"<@{opener_id}> 님, 이어서 말씀해 주세요."
+            ),
+        )
+        await interaction.followup.send(
+            embed=embed,
+            allowed_mentions=discord.AllowedMentions(users=True),
+        )
+        log.info("티켓 다시 열림: %s (%s)", channel.name, member)
 
     async def delete_ticket(self, interaction: discord.Interaction) -> None:
         channel = interaction.channel
