@@ -16,6 +16,9 @@ ACCOUNT_BY_PUUID_URL = (
     "https://{region}.api.riotgames.com/riot/account/v1/accounts/by-puuid/{puuid}"
 )
 LEAGUE_URL = "https://{platform}.api.riotgames.com/lol/league/v4/entries/by-puuid/{puuid}"
+SUMMONER_URL = (
+    "https://{platform}.api.riotgames.com/lol/summoner/v4/summoners/by-puuid/{puuid}"
+)
 
 # 라이엇 티어 문자열 → 서버에서 쓰는 약자
 TIER_CODE: dict[str, str] = {
@@ -194,6 +197,19 @@ class RiotClient:
             game_name=data["gameName"],
             tag_line=data.get("tagLine", ""),
         )
+
+    async def fetch_profile_icon(self, puuid: str) -> Optional[int]:
+        """지금 이 계정이 쓰고 있는 프로필 아이콘 번호. 못 읽으면 None.
+
+        계정 소유 인증에 쓴다. 아이콘은 계정에 로그인할 수 있는 사람만 바꿀
+        수 있어서, 지정한 번호로 바뀐 걸 확인하면 본인이라는 뜻이 된다.
+        """
+        url = SUMMONER_URL.format(platform=RIOT_PLATFORM, puuid=puuid)
+        data = await self._get(url)
+        if not isinstance(data, dict):
+            return None
+        icon = data.get("profileIconId")
+        return int(icon) if isinstance(icon, int) else None
 
     async def fetch_ranks(self, puuid: str) -> dict[str, Optional[RankEntry]]:
         """솔로랭크와 자유랭크를 한 번에 조회한다. 실패하면 둘 다 None."""

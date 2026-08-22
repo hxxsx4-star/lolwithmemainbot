@@ -33,7 +33,8 @@ CREATE TABLE IF NOT EXISTS users (
     chat_xp        INTEGER NOT NULL DEFAULT 0,
     rank_solo      TEXT,
     rank_flex      TEXT,
-    rank_updated_at TEXT
+    rank_updated_at TEXT,
+    riot_verified_at TEXT       -- 계정 소유를 증명한 시각. NULL 이면 미인증
 );
 
 CREATE TABLE IF NOT EXISTS point_log (
@@ -202,12 +203,18 @@ class UserRow:
     rank_solo: Optional[str] = None
     rank_flex: Optional[str] = None
     rank_updated_at: Optional[str] = None
+    riot_verified_at: Optional[str] = None
 
     @property
     def riot_id(self) -> Optional[str]:
         if self.riot_game_name and self.riot_tag_line:
             return f"{self.riot_game_name}#{self.riot_tag_line}"
         return None
+
+    @property
+    def verified(self) -> bool:
+        """계정 소유를 증명했는지. 등록만 한 것과는 다르다."""
+        return bool(self.riot_verified_at)
 
     @property
     def registered(self) -> bool:
@@ -275,6 +282,7 @@ class Database:
                 "rank_solo": "TEXT",
                 "rank_flex": "TEXT",
                 "rank_updated_at": "TEXT",
+                "riot_verified_at": "TEXT",
             },
             "predictions": {
                 "image_a": "TEXT",
@@ -597,12 +605,19 @@ class Database:
         actor_id: int,
     ) -> None:
         await self.ensure_user(user_id)
-        # 계정이 바뀌면 캐시된 랭크 정보는 더 이상 이 사람 것이 아니다
+        # 계정이 바뀌면 캐시된 랭크 정보는 더 이상 이 사람 것이 아니다.
+        # 명의인증도 **그 계정에 대한** 것이므로 같이 지운다. 안 그러면 인증만
+        # 해 두고 남의 계정으로 갈아 끼워 인증 표시를 달 수 있다.
+        previous = await self._fetchone(
+            "SELECT riot_puuid FROM users WHERE user_id = ?", (user_id,)
+        )
+        same = previous is not None and previous["riot_puuid"] == puuid and puuid
         await self._exec(
             "UPDATE users SET riot_game_name = ?, riot_tag_line = ?, riot_puuid = ?,"
             " registered_at = ?, registered_by = ?,"
             " rank_solo = NULL, rank_flex = NULL, rank_updated_at = NULL"
-            " WHERE user_id = ?",
+            + ("" if same else ", riot_verified_at = NULL")
+            + " WHERE user_id = ?",
             (game_name, tag_line, puuid, iso(), actor_id, user_id),
         )
 
@@ -610,10 +625,24 @@ class Database:
         await self._exec(
             "UPDATE users SET riot_game_name = NULL, riot_tag_line = NULL,"
             " riot_puuid = NULL, registered_at = NULL, registered_by = NULL,"
-            " rank_solo = NULL, rank_flex = NULL, rank_updated_at = NULL"
+            " rank_solo = NULL, rank_flex = NULL, rank_updated_at = NULL,"
+            " riot_verified_at = NULL"
             " WHERE user_id = ?",
             (user_id,),
         )
+
+    async def set_verified(self, user_id: int) -> None:
+        """계정 소유가 확인됐다고 표시한다."""
+        await self._exec(
+            "UPDATE users SET riot_verified_at = ? WHERE user_id = ?",
+            (iso(), user_id),
+        )
+
+    async def verified_count(self) -> int:
+        row = await self._fetchone(
+            "SELECT COUNT(*) AS n FROM users WHERE riot_verified_at IS NOT NULL"
+        )
+        return int(row["n"]) if row else 0
 
     async def riot_owner(self, game_name: str, tag_line: str) -> Optional[int]:
         """이미 같은 롤 계정을 등록한 유저가 있는지."""
