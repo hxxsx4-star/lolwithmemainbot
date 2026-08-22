@@ -17,7 +17,7 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 
-from config import Channels, Colors
+from config import Channels, Colors, Roles
 from core.checks import is_staff, staff_only
 from utils.logs import base_embed
 
@@ -32,6 +32,12 @@ class TicketKind:
     style: discord.ButtonStyle
     row: int
     prompt: str
+
+    # 이 종류만 따로 모아 둘 카테고리. 비우면 문의함 패널이 있는 곳에 만든다
+    category_id: int | None = None
+
+    # 티켓이 열릴 때 부를 역할. 담당자가 따로 있는 종류에 쓴다
+    notify_role: int | None = None
 
 
 TICKET_KINDS: tuple[TicketKind, ...] = (
@@ -53,6 +59,8 @@ TICKET_KINDS: tuple[TicketKind, ...] = (
             "티어 조정을 원하시면 **롤 닉네임#태그**와 **현재 티어**를 적고, "
             "전적 검색 링크나 인게임 프로필 사진을 함께 올려 주세요."
         ),
+        category_id=Channels.TIER_TICKETS,
+        notify_role=Roles.TIER_REVIEWER,
     ),
     TicketKind(
         key="report",
@@ -233,8 +241,29 @@ class TicketCog(commands.Cog, name="Ticket"):
                     attach_files=True, embed_links=True,
                 )
 
-        panel_channel = guild.get_channel(Channels.TICKET_PANEL)
-        category = getattr(panel_channel, "category", None)
+        # 담당 역할이 정해진 종류는 그 역할도 채널을 볼 수 있어야 한다
+        if kind.notify_role:
+            handler = guild.get_role(kind.notify_role)
+            if handler is not None:
+                overwrites[handler] = discord.PermissionOverwrite(
+                    view_channel=True, send_messages=True, read_message_history=True,
+                    attach_files=True, embed_links=True,
+                )
+
+        # 종류별로 지정한 카테고리가 있으면 거기에, 없으면 문의함 패널 옆에
+        category = None
+        if kind.category_id:
+            found = guild.get_channel(kind.category_id)
+            if isinstance(found, discord.CategoryChannel):
+                category = found
+            else:
+                log.warning(
+                    "%s 카테고리(%s)를 찾지 못해 기본 위치에 만듭니다.",
+                    kind.label, kind.category_id,
+                )
+        if category is None:
+            panel_channel = guild.get_channel(Channels.TICKET_PANEL)
+            category = getattr(panel_channel, "category", None)
 
         try:
             channel = await guild.create_text_channel(
@@ -272,11 +301,16 @@ class TicketCog(commands.Cog, name="Ticket"):
         embed.add_field(name="유저 ID", value=f"`{interaction.user.id}`", inline=True)
         embed.add_field(name="종류", value=kind.label, inline=True)
 
+        # 담당 역할이 있으면 같이 불러서 바로 확인하게 한다
+        content = interaction.user.mention
+        if kind.notify_role:
+            content = f"<@&{kind.notify_role}> · {content}"
+
         await channel.send(
-            content=interaction.user.mention,
+            content=content,
             embed=embed,
             view=TicketControls(self),
-            allowed_mentions=discord.AllowedMentions(users=True),
+            allowed_mentions=discord.AllowedMentions(users=True, roles=True),
         )
         await interaction.followup.send(
             f"✅ 문의 채널이 만들어졌습니다 → {channel.mention}", ephemeral=True
