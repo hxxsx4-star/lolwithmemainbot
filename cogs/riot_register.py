@@ -16,13 +16,13 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 
-from config import Channels, Colors, GUILD_ID, Verify
+from config import Channels, Colors, GUILD_ID, Roles, Verify
 from core.checks import is_staff
 from core.registration import register_riot_account
 from utils.logs import base_embed, send_log, truncate, user_field
 from utils.parsing import FormatError, split_riot_id
 from utils.riot import RiotError
-from utils.roles import sync_registration_roles
+from utils.roles import set_verified_role, sync_registration_roles
 
 log = logging.getLogger("mainbot.register")
 
@@ -135,12 +135,23 @@ class VerifyView(discord.ui.View):
         button.disabled = True
         self.stop()
 
+        given = False
+        if isinstance(interaction.user, discord.Member):
+            given = await set_verified_role(
+                interaction.user, True, reason="명의인증 완료"
+            )
+
         done = base_embed(
             "✅ 명의인증 완료",
             Colors.SUCCESS,
             description=(
                 f"**`{user.riot_id}`** 이 본인 계정임이 확인되었습니다.\n"
-                "프로필 아이콘은 이제 원래대로 바꾸셔도 됩니다."
+                + (
+                    f"<@&{Roles.VERIFIED}> 역할을 드렸습니다.\n"
+                    if given
+                    else ""
+                )
+                + "프로필 아이콘은 이제 원래대로 바꾸셔도 됩니다."
             ),
         )
         await interaction.followup.send(embed=done, ephemeral=True)
@@ -298,6 +309,8 @@ class RiotRegister(commands.Cog, name="RiotRegister"):
 
         await self.bot.db.clear_riot_account(유저.id)
         await sync_registration_roles(유저, False, reason="롤 계정 등록 해제")
+        # 인증은 그 계정에 대한 것이라 등록이 풀리면 표시도 사라져야 한다
+        await set_verified_role(유저, False, reason="롤 계정 등록 해제")
 
         embed = base_embed(
             "🗑️ 롤 계정 등록 해제",

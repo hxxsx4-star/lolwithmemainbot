@@ -185,6 +185,37 @@ UNCHANGED = "unchanged"            # 이미 올바른 상태여서 건드리지 
 FAILED = "failed"                  # 권한 등의 이유로 바꾸지 못함
 
 
+async def set_verified_role(
+    member: discord.Member, verified: bool, *, reason: str = "명의인증"
+) -> bool:
+    """본인인증 역할을 붙이거나 뗀다. 실제로 바뀌었으면 True.
+
+    인증은 **그 계정에 대한** 것이라, 계정을 갈아 끼우거나 등록을 풀면
+    역할도 같이 빠져야 한다. 그래야 표시와 실제 상태가 어긋나지 않는다.
+    """
+    role = member.guild.get_role(Roles.VERIFIED)
+    if role is None:
+        log.warning("본인인증 역할(%s)을 찾을 수 없습니다.", Roles.VERIFIED)
+        return False
+
+    has = role in member.roles
+    if has == verified:
+        return False
+
+    try:
+        if verified:
+            await member.add_roles(role, reason=reason)
+        else:
+            await member.remove_roles(role, reason=reason)
+    except discord.Forbidden:
+        log.warning("[%s] 본인인증 역할을 바꿀 권한이 없습니다.", member)
+        return False
+    except discord.HTTPException as exc:
+        log.warning("[%s] 본인인증 역할 변경 실패: %s", member, exc)
+        return False
+    return True
+
+
 async def sync_registration_roles(
     member: discord.Member, registered: bool, *, reason: str = "등록 상태 동기화"
 ) -> str:

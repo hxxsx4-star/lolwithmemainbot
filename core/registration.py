@@ -14,7 +14,7 @@ import discord
 from config import Channels, Colors
 from utils.logs import base_embed, send_log, truncate, user_field
 from utils.riot import RiotError
-from utils.roles import SET_REGISTERED, sync_registration_roles
+from utils.roles import SET_REGISTERED, set_verified_role, sync_registration_roles
 
 log = logging.getLogger("mainbot.registration")
 
@@ -99,6 +99,11 @@ async def register_riot_account(
 
     # 4) 미등록 역할 정리
     swapped = await sync_registration_roles(member, True, reason="롤 계정 등록 완료")
+
+    # 다른 계정으로 갈아 끼우면 DB 의 인증 기록이 지워진다. 역할도 같이 빼야
+    # "본인인증" 을 달고 남의 계정을 쓰는 상태가 생기지 않는다
+    fresh = await bot.db.get_user(member.id)
+    await set_verified_role(member, fresh.verified, reason="롤 계정 등록 변경")
 
     result = RegisterResult(
         ok=True,
