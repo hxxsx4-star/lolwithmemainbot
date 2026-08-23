@@ -25,9 +25,10 @@
         </a>
       {% endfor %}
     </div>
+
   {% elif target %}
     <div class="card" style="margin-bottom:14px">
-      <div style="display:flex;justify-content:space-between;flex-wrap:wrap;gap:10px;align-items:baseline">
+      <div style="display:flex;justify-content:space-between;flex-wrap:wrap;gap:14px">
         <div>
           <div style="font-size:20px;font-weight:800">
             {{ target.riot_game_name }}<span style="color:var(--muted)">#{{ target.riot_tag_line }}</span>
@@ -43,6 +44,14 @@
           </div>
         {% endif %}
       </div>
+
+      {% if totals.shares %}
+        <div class="summary">
+          <div><div class="n">{{ totals.shares }}인분</div><div class="k">평균 기여</div></div>
+          <div><div class="n">{{ totals.unlucky }}</div><div class="k">잘하고 진 판</div></div>
+          <div><div class="n">{{ totals.carried }}</div><div class="k">묻어간 판</div></div>
+        </div>
+      {% endif %}
     </div>
 
     {% for title, rows, tot in [("최근 경기", games, totals), ("내전", customs, custom_totals)] %}
@@ -52,20 +61,66 @@
           {% if tot.played %}<span style="color:var(--muted);font-weight:400;
             text-transform:none;letter-spacing:0"> — {{ tot.wins }}승 {{ tot.losses }}패 ({{ tot.rate }}%)</span>{% endif %}
         </p>
+
         {% if rows %}
-          <div class="scroll"><table>
-            <tr><th>결과</th><th>챔피언</th><th>종류</th><th>KDA</th><th class="num">평점</th><th class="num">시간</th></tr>
-            {% for g in rows %}
-              <tr>
-                <td><span class="pill {{ 'win' if g.win else 'lose' }}">{{ '승' if g.win else '패' }}</span></td>
-                <td><strong>{{ g.champion }}</strong></td>
-                <td><span class="pill {{ 'gold' if g.custom else 'teal' }}">{{ g.queue }}</span></td>
-                <td style="font-family:var(--mono)">{{ g.kda }}</td>
-                <td class="num">{{ g.ratio }}</td>
-                <td class="num">{{ g.minutes }}분</td>
-              </tr>
-            {% endfor %}
-          </table></div>
+          {% for g in rows %}
+            <div class="game {{ 'win' if g.win else 'lose' }}">
+              <div class="game-head">
+                {% if g.icon %}<img class="champ" src="{{ g.icon }}" alt="{{ g.champion }}" loading="lazy">{% endif %}
+                <div class="game-id">
+                  <div class="champ-name">{{ g.champion }}</div>
+                  <div class="meta">
+                    <span class="pill {{ 'win' if g.win else 'lose' }}">{{ '승' if g.win else '패' }}</span>
+                    <span class="pill {{ 'gold' if g.custom else 'teal' }}">{{ g.queue }}</span>
+                    <span class="dim">{{ g.minutes }}분</span>
+                  </div>
+                </div>
+                <div class="game-kda">
+                  <div class="kda">{{ g.kda }}</div>
+                  <div class="dim">평점 {{ g.ratio }}</div>
+                </div>
+                {% if g.perf %}
+                  <div class="game-perf">
+                    <div class="shares">{{ g.perf.shares }}<span>인분</span></div>
+                    <div class="dim">{{ g.perf.grade }}</div>
+                  </div>
+                {% endif %}
+              </div>
+
+              {% if g.perf %}
+                <div class="bars">
+                  {% for name, pct in [("딜 비중", g.perf.damage_pct), ("킬 관여", g.perf.kp_pct), ("골드", g.perf.gold_pct)] %}
+                    <div class="bar">
+                      <div class="bar-top"><span>{{ name }}</span><strong>{{ pct }}%</strong></div>
+                      {# 5명이 고르면 20%. 그 선을 넘었는지가 한눈에 보이게 한다 #}
+                      <div class="bar-track">
+                        <div class="bar-fill" style="width:{{ [pct, 100] | min }}%"></div>
+                        <div class="bar-mark"></div>
+                      </div>
+                    </div>
+                  {% endfor %}
+                  <div class="bar">
+                    <div class="bar-top"><span>분당 딜</span><strong>{{ "{:,}".format(g.perf.dpm) }}</strong></div>
+                    <div class="bar-top"><span>분당 CS</span><strong>{{ g.perf.cs_per_min }}</strong></div>
+                  </div>
+                </div>
+              {% endif %}
+
+              <div class="mates">
+                {% for m in g.teammates %}
+                  <span class="mate" title="{{ m.champion }} · {{ m.kills }}/{{ m.deaths }}/{{ m.assists }}">
+                    <img src="{{ m.icon }}" alt="{{ m.champion }}" loading="lazy">
+                  </span>
+                {% endfor %}
+                {% if g.luck %}
+                  <span class="pill {{ 'lose' if g.luck == '나쁨' else 'win' }}" style="margin-left:auto">
+                    팀운 {{ g.luck }}
+                  </span>
+                {% endif %}
+              </div>
+              {% if g.luck_note %}<div class="note">{{ g.luck_note }}</div>{% endif %}
+            </div>
+          {% endfor %}
         {% else %}
           <div class="empty">
             {% if title == "내전" %}최근 경기 중 내전이 없습니다.{% else %}
@@ -74,6 +129,7 @@
         {% endif %}
       </div>
     {% endfor %}
+
   {% elif q %}
     <div class="card"><div class="empty">
       <strong>{{ q }}</strong> 와 맞는 서버원을 찾지 못했습니다.<br>

@@ -74,12 +74,57 @@
   td.num{font-family:var(--mono);font-variant-numeric:tabular-nums;text-align:right}
   .scroll{overflow-x:auto}
 
+  /* 좁은 칸에 들어가면 "솔/로/랭/크" 처럼 세로로 쪼개진다. 반드시 한 줄로 */
   .pill{display:inline-block;padding:3px 9px;border-radius:99px;font-size:12px;
-        font-weight:700;border:1px solid}
+        font-weight:700;border:1px solid;white-space:nowrap}
   .pill.win{color:#9cc7f0;border-color:rgba(74,143,212,.5);background:rgba(74,143,212,.13)}
   .pill.lose{color:#e5a3a3;border-color:rgba(192,90,90,.5);background:rgba(192,90,90,.13)}
   .pill.teal{color:var(--teal);border-color:rgba(10,200,185,.45);background:rgba(10,200,185,.1)}
   .pill.gold{color:var(--gold-warm);border-color:rgba(200,170,110,.45);background:rgba(200,170,110,.1)}
+
+  /* ───────────────────── 경기 한 판 ─────────────────────
+     표로 만들면 칸이 좁아 잘리고 세로로 쪼개진다. 카드로 쌓아
+     좁은 화면에서도 접히게 한다. */
+  .game{border:1px solid var(--line);border-radius:12px;padding:14px;margin-bottom:10px;
+        background:var(--ink-2);border-left:3px solid var(--line)}
+  .game.win{border-left-color:var(--win)}
+  .game.lose{border-left-color:var(--lose)}
+
+  .game-head{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+  .game img.champ{width:46px;height:46px;border-radius:10px;flex:none;
+                  border:1px solid var(--gold-dim);background:var(--panel)}
+  .game-id{min-width:0;flex:1}
+  .champ-name{font-weight:800;font-size:15px}
+  .meta{display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-top:3px}
+  .dim{color:var(--muted);font-size:12.5px}
+  .game-kda{text-align:right;flex:none}
+  .kda{font-family:var(--mono);font-variant-numeric:tabular-nums;font-weight:700;font-size:15px}
+  .game-perf{text-align:right;flex:none;padding-left:12px;border-left:1px solid var(--line)}
+  .shares{font-family:var(--mono);font-size:20px;font-weight:700;color:var(--gold-warm)}
+  .shares span{font-size:12px;color:var(--muted);margin-left:2px;font-family:var(--display)}
+
+  .bars{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));
+        gap:10px 16px;margin-top:12px;padding-top:12px;border-top:1px solid var(--line)}
+  .bar-top{display:flex;justify-content:space-between;gap:8px;font-size:12px;color:var(--muted)}
+  .bar-top strong{color:var(--cream);font-family:var(--mono);font-variant-numeric:tabular-nums}
+  .bar-track{position:relative;height:6px;border-radius:99px;
+             background:rgba(206,210,222,.18);margin-top:5px;overflow:hidden}
+  .bar-fill{height:100%;border-radius:99px;
+            background:linear-gradient(90deg,var(--gold-dim),var(--gold-warm))}
+  /* 5명이 고르게 나누면 20%. 그 선을 넘겼는지가 한눈에 보이게 눈금을 둔다 */
+  .bar-mark{position:absolute;left:20%;top:-2px;bottom:-2px;width:1px;
+            background:rgba(244,241,232,.55)}
+
+  .mates{display:flex;gap:5px;align-items:center;flex-wrap:wrap;margin-top:12px}
+  .mate img{width:26px;height:26px;border-radius:7px;opacity:.75;
+            border:1px solid var(--line);background:var(--panel)}
+  .mate img:hover{opacity:1}
+  .note{color:var(--muted);font-size:12.5px;margin-top:8px}
+
+  .summary{display:grid;grid-template-columns:repeat(auto-fit,minmax(110px,1fr));
+           gap:12px;margin-top:16px;padding-top:16px;border-top:1px solid var(--line)}
+  .summary .n{font-family:var(--mono);font-size:20px;font-weight:700;color:var(--gold-warm)}
+  .summary .k{font-size:12.5px;color:var(--muted)}
 
   .empty{color:var(--muted);padding:28px 0;text-align:center;font-size:14px}
   footer{border-top:1px solid var(--line);padding:22px 0 40px;color:var(--muted);font-size:13px}
