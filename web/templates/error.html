@@ -1,0 +1,10 @@
+{% extends "base.html" %}
+{% block title %}{{ title }} · 롤 같이 하자{% endblock %}
+{% block body %}
+  <h1>{{ title }}</h1>
+  <p class="sub">{{ message }}</p>
+  <div style="display:flex;gap:10px;flex-wrap:wrap">
+    <a class="btn btn-ghost" href="/">처음으로</a>
+    {% if invite %}<a class="btn btn-primary" href="{{ invite }}">디스코드 참여하기</a>{% endif %}
+  </div>
+{% endblock %}

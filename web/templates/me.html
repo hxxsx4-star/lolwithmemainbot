@@ -1,0 +1,74 @@
+{% extends "base.html" %}
+{% block title %}내 프로필 · 롤 같이 하자{% endblock %}
+{% block body %}
+  <h1>{{ user.name }}</h1>
+  <p class="sub">
+    {% if me.riot_id %}
+      <code style="color:var(--gold-warm)">{{ me.riot_id }}</code>
+      {% if me.verified %}<span class="pill teal">본인인증 완료</span>{% endif %}
+    {% else %}
+      아직 롤 계정을 등록하지 않았습니다. 디스코드에서 <code>/등록</code> 을 써 주세요.
+    {% endif %}
+  </p>
+
+  <div class="grid cols-3" style="margin-bottom:14px">
+    <div class="card stat"><div class="n">{{ "{:,}".format(me.points) }}</div><div class="k">보유 포인트</div></div>
+    <div class="card stat"><div class="n">{{ me.total_attendance }}</div><div class="k">총 출석 · 연속 {{ me.streak }}일</div></div>
+    <div class="card stat"><div class="n">{{ (me.voice_seconds // 3600) }}</div><div class="k">통화방 시간</div></div>
+  </div>
+
+  <div class="grid cols-2">
+    <div class="card">
+      <p class="label">레벨</p>
+      {% for name, lv, color in [("음성", me.voice_level, "linear-gradient(90deg,var(--gold-dim),var(--gold-warm))"),
+                                 ("채팅", me.chat_level, "linear-gradient(90deg,#2f6ea8,#7fc0ea)")] %}
+        <div style="margin-bottom:{{ '16px' if not loop.last else '0' }}">
+          <div style="display:flex;justify-content:space-between;align-items:baseline">
+            <strong>{{ name }} 레벨</strong>
+            <span style="color:var(--gold-warm);font-weight:800">Lv. {{ lv[0] }}</span>
+          </div>
+          <div class="track"><div class="fill" style="width:{{ (lv[1] / lv[2] * 100) | round(1) }}%;background:{{ color }}"></div></div>
+          <div class="xp">{{ "{:,}".format(lv[1]) }} / {{ "{:,}".format(lv[2]) }} XP</div>
+        </div>
+      {% endfor %}
+    </div>
+
+    <div class="card">
+      <p class="label">승부예측</p>
+      {% if predictions.played %}
+        <div style="font-size:26px;font-weight:800;font-family:var(--mono);
+                    color:{{ 'var(--teal)' if predictions.profit >= 0 else '#e5a3a3' }}">
+          {{ '+' if predictions.profit >= 0 else '' }}{{ "{:,}".format(predictions.profit) }}P
+        </div>
+        <div style="color:var(--muted);font-size:14px">
+          {{ predictions.correct }}적중 / {{ predictions.played }}경기
+          ({{ (predictions.correct / predictions.played * 100) | round | int }}%)
+        </div>
+      {% else %}
+        <div class="empty" style="padding:10px 0">아직 결과가 나온 예측이 없습니다.</div>
+      {% endif %}
+
+      <p class="label" style="margin-top:20px">티어</p>
+      {% if solo or flex %}
+        {% if solo %}<div>솔로랭크 · <strong>{{ solo }}</strong></div>{% endif %}
+        {% if flex %}<div>자유랭크 · <strong>{{ flex }}</strong></div>{% endif %}
+      {% else %}
+        <div style="color:var(--muted);font-size:14px">
+          디스코드에서 <code>/프로필</code> 을 한 번 열면 티어를 가져옵니다.
+        </div>
+      {% endif %}
+    </div>
+  </div>
+
+  {% if items %}
+    <div class="card" style="margin-top:14px">
+      <p class="label">보유 아이템</p>
+      <div class="scroll"><table>
+        <tr><th>종류</th><th>항목</th><th>남은 기간</th></tr>
+        {% for it in items %}
+          <tr><td>{{ it.kind }}</td><td>{{ it.name }}</td><td class="num">{{ it.left }}일</td></tr>
+        {% endfor %}
+      </table></div>
+    </div>
+  {% endif %}
+{% endblock %}

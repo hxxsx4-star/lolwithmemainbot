@@ -1,0 +1,83 @@
+{% extends "base.html" %}
+{% block title %}전적 검색 · 롤 같이 하자{% endblock %}
+{% block body %}
+  <h1>전적 검색</h1>
+  <p class="sub">등록을 마친 서버원 {{ member_count }}명 안에서 찾습니다.</p>
+
+  <form class="card" method="get" action="/search"
+        style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:16px">
+    <input name="q" value="{{ q }}" placeholder="롤 닉네임 일부를 입력하세요"
+           autocomplete="off" style="flex:1;min-width:200px;padding:11px 14px;
+           border-radius:9px;border:1px solid var(--line);background:var(--ink-2);
+           color:var(--cream);font-family:inherit;font-size:15px">
+    <button class="btn btn-primary" type="submit">검색</button>
+  </form>
+
+  {% if hits %}
+    <div class="card">
+      <p class="label">이 중에 찾으시는 분이 있나요</p>
+      {% for m in hits %}
+        <a href="/search?q={{ m.riot_game_name }}%23{{ m.riot_tag_line }}"
+           style="display:block;padding:9px 0;border-bottom:1px solid var(--line);
+                  text-decoration:none;color:var(--cream)">
+          {{ m.riot_game_name }}<span style="color:var(--muted)">#{{ m.riot_tag_line }}</span>
+          {% if m.riot_verified_at %}<span class="pill teal" style="margin-left:6px">인증</span>{% endif %}
+        </a>
+      {% endfor %}
+    </div>
+  {% elif target %}
+    <div class="card" style="margin-bottom:14px">
+      <div style="display:flex;justify-content:space-between;flex-wrap:wrap;gap:10px;align-items:baseline">
+        <div>
+          <div style="font-size:20px;font-weight:800">
+            {{ target.riot_game_name }}<span style="color:var(--muted)">#{{ target.riot_tag_line }}</span>
+          </div>
+          {% if target.riot_verified_at %}<span class="pill teal">본인인증 완료</span>{% endif %}
+        </div>
+        {% if totals.played %}
+          <div style="text-align:right">
+            <div style="font-family:var(--mono);font-size:22px;font-weight:700">
+              {{ totals.wins }}승 {{ totals.losses }}패
+            </div>
+            <div style="color:var(--muted);font-size:13px">최근 {{ totals.played }}경기 · 승률 {{ totals.rate }}%</div>
+          </div>
+        {% endif %}
+      </div>
+    </div>
+
+    {% for title, rows, tot in [("최근 경기", games, totals), ("내전", customs, custom_totals)] %}
+      <div class="card" style="margin-bottom:14px">
+        <p class="label">
+          {{ title }}
+          {% if tot.played %}<span style="color:var(--muted);font-weight:400;
+            text-transform:none;letter-spacing:0"> — {{ tot.wins }}승 {{ tot.losses }}패 ({{ tot.rate }}%)</span>{% endif %}
+        </p>
+        {% if rows %}
+          <div class="scroll"><table>
+            <tr><th>결과</th><th>챔피언</th><th>종류</th><th>KDA</th><th class="num">평점</th><th class="num">시간</th></tr>
+            {% for g in rows %}
+              <tr>
+                <td><span class="pill {{ 'win' if g.win else 'lose' }}">{{ '승' if g.win else '패' }}</span></td>
+                <td><strong>{{ g.champion }}</strong></td>
+                <td><span class="pill {{ 'gold' if g.custom else 'teal' }}">{{ g.queue }}</span></td>
+                <td style="font-family:var(--mono)">{{ g.kda }}</td>
+                <td class="num">{{ g.ratio }}</td>
+                <td class="num">{{ g.minutes }}분</td>
+              </tr>
+            {% endfor %}
+          </table></div>
+        {% else %}
+          <div class="empty">
+            {% if title == "내전" %}최근 경기 중 내전이 없습니다.{% else %}
+            아직 불러온 경기가 없습니다. 잠시 뒤 새로고침해 주세요.{% endif %}
+          </div>
+        {% endif %}
+      </div>
+    {% endfor %}
+  {% elif q %}
+    <div class="card"><div class="empty">
+      <strong>{{ q }}</strong> 와 맞는 서버원을 찾지 못했습니다.<br>
+      등록을 마친 사람만 검색됩니다.
+    </div></div>
+  {% endif %}
+{% endblock %}

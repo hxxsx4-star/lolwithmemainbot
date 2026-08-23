@@ -1,0 +1,118 @@
+{# 랜딩 페이지와 같은 팔레트를 쓴다. 봇의 프로필 카드에서 가져온 색이라
+   사이트·디스코드·카드가 한 물건으로 보인다. #}
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#070c1c">
+<meta name="robots" content="noindex">{# 개인 페이지는 검색에 안 잡히게 #}
+<title>{% block title %}롤 같이 하자{% endblock %}</title>
+<style>
+  :root {
+    --ink:#070c1c; --ink-2:#0a1026; --panel:#0c142c; --panel-2:#101a38;
+    --line:#222f52; --gold:#c8aa6e; --gold-warm:#e3c88c; --gold-dim:#785a28;
+    --teal:#0ac8b9; --cream:#f4f1e8; --muted:#a8b2c8; --muted-warm:#baa99e;
+    --win:#4a8fd4; --lose:#c05a5a;
+    --display:-apple-system,BlinkMacSystemFont,"Apple SD Gothic Neo","Noto Sans KR",
+              "Malgun Gothic","맑은 고딕",Roboto,sans-serif;
+    --mono:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,monospace;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--ink);color:var(--cream);font-family:var(--display);
+       line-height:1.6;-webkit-font-smoothing:antialiased}
+  a{color:var(--gold-warm)}
+  .wrap{width:100%;max-width:940px;margin:0 auto;padding:0 20px}
+
+  header.top{border-bottom:1px solid var(--line);background:var(--ink-2)}
+  .top-in{display:flex;align-items:center;gap:16px;height:62px}
+  .brand{font-weight:800;letter-spacing:-.02em;text-decoration:none;color:var(--cream);
+         font-size:17px;white-space:nowrap}
+  .brand span{color:var(--gold)}
+  nav{display:flex;gap:4px;margin-left:auto;align-items:center}
+  nav a{padding:8px 14px;border-radius:8px;text-decoration:none;color:var(--muted);
+        font-size:14px;font-weight:600}
+  nav a:hover{background:var(--panel);color:var(--cream)}
+  nav a.on{color:var(--gold-warm);background:var(--panel)}
+  .who{display:flex;align-items:center;gap:9px;padding-left:14px;
+       border-left:1px solid var(--line);margin-left:6px}
+  .who img{width:28px;height:28px;border-radius:50%;border:1px solid var(--gold-dim)}
+  .who .nm{font-size:13px;color:var(--muted);max-width:130px;overflow:hidden;
+           text-overflow:ellipsis;white-space:nowrap}
+
+  main{padding:36px 0 64px}
+  h1{font-size:clamp(24px,4vw,32px);letter-spacing:-.025em;margin:0 0 6px;font-weight:800}
+  .sub{color:var(--muted);margin:0 0 28px;font-size:14.5px}
+
+  .btn{display:inline-flex;align-items:center;gap:8px;padding:11px 20px;border-radius:9px;
+       font-weight:800;font-size:15px;text-decoration:none;border:1px solid transparent;
+       cursor:pointer;font-family:inherit}
+  .btn-primary{background:linear-gradient(180deg,var(--gold-warm),var(--gold));color:#23180a}
+  .btn-ghost{border-color:var(--line);color:var(--cream);background:var(--panel)}
+  .btn:hover{filter:brightness(1.07)}
+  .btn:focus-visible{outline:2px solid var(--teal);outline-offset:2px}
+
+  .card{border:1px solid var(--line);border-radius:14px;
+        background:linear-gradient(178deg,var(--panel-2),var(--panel));padding:22px}
+  .grid{display:grid;gap:14px}
+  .cols-3{grid-template-columns:repeat(auto-fit,minmax(190px,1fr))}
+  .cols-2{grid-template-columns:repeat(auto-fit,minmax(260px,1fr))}
+
+  .label{font-size:12px;letter-spacing:.12em;text-transform:uppercase;
+         color:var(--gold);font-weight:700;margin:0 0 12px}
+  .stat .n{font-family:var(--mono);font-variant-numeric:tabular-nums;
+           font-size:26px;font-weight:700;color:var(--gold-warm);letter-spacing:-.02em}
+  .stat .k{font-size:13px;color:var(--muted);margin-top:2px}
+
+  .track{height:8px;border-radius:99px;background:rgba(206,210,222,.2);overflow:hidden;margin:8px 0 5px}
+  .fill{height:100%;border-radius:99px}
+  .xp{font-family:var(--mono);font-size:11.5px;color:var(--muted);text-align:right}
+
+  table{width:100%;border-collapse:collapse;font-size:14px}
+  th,td{text-align:left;padding:10px 12px;border-bottom:1px solid var(--line)}
+  th{font-size:12px;color:var(--muted);font-weight:700;letter-spacing:.04em}
+  td.num{font-family:var(--mono);font-variant-numeric:tabular-nums;text-align:right}
+  .scroll{overflow-x:auto}
+
+  .pill{display:inline-block;padding:3px 9px;border-radius:99px;font-size:12px;
+        font-weight:700;border:1px solid}
+  .pill.win{color:#9cc7f0;border-color:rgba(74,143,212,.5);background:rgba(74,143,212,.13)}
+  .pill.lose{color:#e5a3a3;border-color:rgba(192,90,90,.5);background:rgba(192,90,90,.13)}
+  .pill.teal{color:var(--teal);border-color:rgba(10,200,185,.45);background:rgba(10,200,185,.1)}
+  .pill.gold{color:var(--gold-warm);border-color:rgba(200,170,110,.45);background:rgba(200,170,110,.1)}
+
+  .empty{color:var(--muted);padding:28px 0;text-align:center;font-size:14px}
+  footer{border-top:1px solid var(--line);padding:22px 0 40px;color:var(--muted);font-size:13px}
+
+  @media (max-width:560px){
+    .top-in{height:auto;padding:12px 0;flex-wrap:wrap;gap:10px}
+    nav{margin-left:0;width:100%;overflow-x:auto}
+    .who{margin-left:auto;border-left:0;padding-left:0}
+  }
+</style>
+</head>
+<body>
+<header class="top">
+  <div class="wrap top-in">
+    <a class="brand" href="/">롤 <span>같이</span> 하자</a>
+    {% if user %}
+      <nav>
+        <a href="/me" class="{% if active == 'me' %}on{% endif %}">내 프로필</a>
+        <a href="/search" class="{% if active == 'search' %}on{% endif %}">전적 검색</a>
+        <a href="/logout">로그아웃</a>
+      </nav>
+      <div class="who">
+        <img src="{{ avatar or '' }}" alt="">
+        <span class="nm">{{ user.name }}</span>
+      </div>
+    {% else %}
+      <nav><a href="/login">디스코드로 로그인</a></nav>
+    {% endif %}
+  </div>
+</header>
+
+<main><div class="wrap">{% block body %}{% endblock %}</div></main>
+
+<footer><div class="wrap">롤 같이 하자 · 서버원 전용 페이지</div></footer>
+</body>
+</html>

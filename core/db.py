@@ -152,6 +152,28 @@ CREATE TABLE IF NOT EXISTS prediction_votes (
     PRIMARY KEY (match_id, user_id)
 );
 CREATE INDEX IF NOT EXISTS idx_prediction_votes_user ON prediction_votes(user_id);
+
+CREATE TABLE IF NOT EXISTS match_cache (
+    match_id   TEXT PRIMARY KEY,
+    queue_id   INTEGER,
+    game_type  TEXT,            -- MATCHED_GAME / CUSTOM_GAME
+    started_at INTEGER,         -- epoch ms
+    duration   INTEGER,         -- 초
+    payload    TEXT NOT NULL,   -- 참가자 요약 JSON
+    fetched_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_match_cache_started ON match_cache(started_at);
+
+CREATE TABLE IF NOT EXISTS match_ids (
+    puuid      TEXT NOT NULL,
+    match_id   TEXT NOT NULL,
+    PRIMARY KEY (puuid, match_id)
+);
+
+CREATE TABLE IF NOT EXISTS match_sync (
+    puuid      TEXT PRIMARY KEY,
+    synced_at  TEXT NOT NULL
+);
 """
 
 
@@ -384,6 +406,70 @@ class Database:
         )
         await self.conn.commit()
         return balance
+
+    # ------------------------------------------------------------- 전적 캐시
+
+    async def cached_match(self, match_id: str) -> Optional[aiosqlite.Row]:
+        return await self._fetchone(
+            "SELECT * FROM match_cache WHERE match_id = ?", (match_id,)
+        )
+
+    async def save_match(
+        self,
+        match_id: str,
+        queue_id: int,
+        game_type: str,
+        started_at: int,
+        duration: int,
+        payload: str,
+    ) -> None:
+        """매치 하나를 저장한다. 끝난 경기는 내용이 안 바뀌므로 한 번만 받으면 된다."""
+        await self._exec(
+            "INSERT OR REPLACE INTO match_cache"
+            "(match_id, queue_id, game_type, started_at, duration, payload, fetched_at)"
+            " VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (match_id, queue_id, game_type, started_at, duration, payload, iso()),
+        )
+
+    async def link_matches(self, puuid: str, match_ids: Iterable[str]) -> None:
+        ids = list(match_ids)
+        if not ids:
+            return
+        await self.conn.executemany(
+            "INSERT OR IGNORE INTO match_ids(puuid, match_id) VALUES (?, ?)",
+            [(puuid, m) for m in ids],
+        )
+        await self.conn.commit()
+
+    async def matches_of(self, puuid: str, limit: int = 20) -> list[aiosqlite.Row]:
+        """이 사람의 매치를 최신순으로. 캐시에 있는 것만 나온다."""
+        return await self._fetchall(
+            "SELECT c.* FROM match_ids i JOIN match_cache c ON c.match_id = i.match_id"
+            " WHERE i.puuid = ? ORDER BY c.started_at DESC LIMIT ?",
+            (puuid, limit),
+        )
+
+    async def match_synced_at(self, puuid: str) -> Optional[str]:
+        row = await self._fetchone(
+            "SELECT synced_at FROM match_sync WHERE puuid = ?", (puuid,)
+        )
+        return str(row["synced_at"]) if row else None
+
+    async def mark_match_synced(self, puuid: str) -> None:
+        await self._exec(
+            "INSERT INTO match_sync(puuid, synced_at) VALUES (?, ?)"
+            " ON CONFLICT(puuid) DO UPDATE SET synced_at = excluded.synced_at",
+            (puuid, iso()),
+        )
+
+    async def registered_members(self) -> list[aiosqlite.Row]:
+        """검색 대상. 등록을 마친 사람만."""
+        return await self._fetchall(
+            "SELECT user_id, riot_game_name, riot_tag_line, riot_puuid,"
+            " riot_verified_at"
+            " FROM users WHERE riot_puuid IS NOT NULL"
+            " ORDER BY riot_game_name COLLATE NOCASE"
+        )
 
     async def economy_totals(self) -> dict[str, int]:
         """지금 돌고 있는 포인트의 총량과 보유자 수."""

@@ -644,3 +644,24 @@ FONT_CANDIDATES_REGULAR: tuple[Path | str, ...] = (
     "/System/Library/Fonts/AppleSDGothicNeo.ttc",
     "/usr/share/fonts/truetype/wqy/wqy-zenhei.ttc",  # 최후의 수단 (한글 글리프 포함)
 )
+
+
+class Web:
+    """웹사이트 설정.
+
+    봇과 같은 VM 에서 돌지만 **별도 프로세스**다. 웹이 죽어도 봇은 살아 있고,
+    반대도 마찬가지다. DB 는 읽기만 한다 — 웹에서 포인트를 건드릴 수 있으면
+    그게 곧 구멍이 된다.
+    """
+
+    BASE_URL = os.getenv("WEB_BASE_URL", "https://lolwithus.p-e.kr")
+    HOST = "127.0.0.1"          # nginx 뒤에만 붙는다. 밖으로 직접 열지 않는다
+    PORT = 8080
+
+    CLIENT_ID = os.getenv("DISCORD_CLIENT_ID", "1536051921587277964")
+    CLIENT_SECRET = os.getenv("DISCORD_CLIENT_SECRET", "")
+    SESSION_SECRET = os.getenv("WEB_SESSION_SECRET", "")
+
+    SESSION_DAYS = 14           # 로그인 유지 기간
+    MATCH_COUNT = 10            # 전적에서 보여줄 경기 수
+    MATCH_CACHE_HOURS = 6       # 이 시간 안에 조회한 매치 목록은 다시 안 받는다
