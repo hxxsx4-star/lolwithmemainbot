@@ -199,10 +199,15 @@ async def search(request: Request, q: str = ""):
         games = await matches.recent(db, puuid, Web.MATCH_COUNT)
         customs = await matches.recent(db, puuid, Web.MATCH_COUNT, only_custom=True)
 
+    # 검색어가 없으면 목록을 보여 준다. 닉네임을 알아야만 쓸 수 있으면
+    # 정작 남의 전적이 궁금할 때 못 찾는다
+    browse = [] if (q or target) else members
+
     return page(
         request, "search.html", active="search", q=q,
         member_count=len(members),
         hits=[] if target else hits[:20],
+        browse=browse,
         target=target, games=games, customs=customs,
         totals=matches.totals(games), custom_totals=matches.totals(customs),
         avatar=auth.avatar_url(user["id"], user["avatar"], 128),

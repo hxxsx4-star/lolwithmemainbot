@@ -135,5 +135,18 @@
       <strong>{{ q }}</strong> 와 맞는 서버원을 찾지 못했습니다.<br>
       등록을 마친 사람만 검색됩니다.
     </div></div>
+
+  {% elif browse %}
+    <div class="card">
+      <p class="label">서버원 둘러보기 · {{ browse | length }}명</p>
+      <div class="browse">
+        {% for m in browse %}
+          <a href="/search?q={{ m.riot_game_name }}%23{{ m.riot_tag_line }}">
+            <span class="nm">{{ m.riot_game_name }}</span><span class="tg">#{{ m.riot_tag_line }}</span>
+            {% if m.riot_verified_at %}<span class="pill teal">인증</span>{% endif %}
+          </a>
+        {% endfor %}
+      </div>
+    </div>
   {% endif %}
 {% endblock %}
